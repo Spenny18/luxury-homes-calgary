@@ -644,16 +644,56 @@ export async function registerRoutes(
   node["shop"~"^(supermarket|mall|convenience|department_store|bakery|deli|greengrocer)$"](around:${radius},${lat},${lng});
 );
 out center tags;`;
-    try {
-      const response = await fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "data=" + encodeURIComponent(ql),
-      });
-      if (!response.ok) {
-        return res.status(502).json({ message: "Overpass unavailable", status: response.status });
+    // Try multiple Overpass mirrors — the main server (overpass-api.de) often
+    // returns 406 / 429 / 504 under load. Fall back through community mirrors
+    // before giving up.
+    const OVERPASS_MIRRORS = [
+      "https://overpass-api.de/api/interpreter",
+      "https://overpass.kumi.systems/api/interpreter",
+      "https://overpass.openstreetmap.fr/api/interpreter",
+      "https://overpass.private.coffee/api/interpreter",
+    ];
+    let overpassData: any = null;
+    let lastStatus: number | null = null;
+    let lastError: string | null = null;
+    for (const url of OVERPASS_MIRRORS) {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            // Some mirrors return 406 without an explicit Accept header.
+            "Accept": "application/json,text/plain,*/*",
+            "User-Agent": "RiversRealEstate/1.0 (https://luxuryhomescalgary.ca)",
+          },
+          body: "data=" + encodeURIComponent(ql),
+        });
+        if (!response.ok) {
+          lastStatus = response.status;
+          lastError = `${url} -> ${response.status}`;
+          console.warn("[pois] mirror failed:", lastError);
+          continue;
+        }
+        overpassData = await response.json();
+        if (overpassData) break;
+      } catch (e: any) {
+        lastError = `${url} -> ${e?.message ?? "fetch failed"}`;
+        console.warn("[pois] mirror error:", lastError);
       }
-      const data: any = await response.json();
+    }
+    try {
+      if (!overpassData) {
+        // All mirrors failed — return empty (don't cache, so we'll retry on next request).
+        console.error("[pois] all Overpass mirrors failed:", lastError);
+        return res.json({
+          center: { lat, lng },
+          radius,
+          schools: [], restaurants: [], parks: [], transit: [],
+          cached: false,
+          error: `Overpass mirrors unavailable (last status ${lastStatus ?? "n/a"})`,
+        });
+      }
+      const data = overpassData;
       const elements: any[] = data.elements ?? [];
 
       const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
