@@ -85,6 +85,9 @@ interface Filters {
   poolYn: string;
   waterfrontYn: string;
   airConditioned: string;
+  suiteYn: string;
+  legalSuiteYn: string;
+  suiteLocations: string; // multi (csv)
   // Multi-value (csv) structured filters
   basements: string;
   basementDevelopments: string;
@@ -128,6 +131,9 @@ const DEFAULT_FILTERS: Filters = {
   poolYn: "",
   waterfrontYn: "",
   airConditioned: "",
+  suiteYn: "",
+  legalSuiteYn: "",
+  suiteLocations: "",
   basements: "",
   basementDevelopments: "",
   parkingFeatures: "",
@@ -360,6 +366,7 @@ function parseQuery(qs: string): Partial<Filters> {
     "propertyType", "propertySubTypes", "cities", "neighbourhood", "postalCode",
     "minSqft", "maxSqft", "yearMin", "yearMax", "garageMin", "domMax",
     "hasPhotos", "garageYn", "poolYn", "waterfrontYn", "airConditioned",
+    "suiteYn", "legalSuiteYn", "suiteLocations",
     "basements", "basementDevelopments", "parkingFeatures", "lotFeatures",
     "laundryFeatures", "appliances", "levels", "structureTypes",
     "architecturalStyles", "accessibilityFeatures", "associationAmenities",
@@ -579,6 +586,9 @@ export default function MlsSearchPage() {
     if (filters.poolYn) p.set("poolYn", filters.poolYn);
     if (filters.waterfrontYn) p.set("waterfrontYn", filters.waterfrontYn);
     if (filters.airConditioned) p.set("airConditioned", filters.airConditioned);
+    if (filters.suiteYn) p.set("suiteYn", filters.suiteYn);
+    if (filters.legalSuiteYn) p.set("legalSuiteYn", filters.legalSuiteYn);
+    if (filters.suiteLocations) p.set("suiteLocations", filters.suiteLocations);
     if (filters.basements) p.set("basements", filters.basements);
     if (filters.basementDevelopments) p.set("basementDevelopments", filters.basementDevelopments);
     if (filters.parkingFeatures) p.set("parkingFeatures", filters.parkingFeatures);
@@ -646,6 +656,9 @@ export default function MlsSearchPage() {
     if (filters.poolYn) n++;
     if (filters.waterfrontYn) n++;
     if (filters.airConditioned) n++;
+    if (filters.suiteYn) n++;
+    if (filters.legalSuiteYn) n++;
+    if (filters.suiteLocations) n++;
     if (filters.basements) n++;
     if (filters.basementDevelopments) n++;
     if (filters.parkingFeatures) n++;
@@ -1105,6 +1118,31 @@ export default function MlsSearchPage() {
                       />
                       Only listings with photos
                     </label>
+                  </FilterSection>
+
+                  {/* SUITE / SECONDARY DWELLING */}
+                  <FilterSection title="Suite (secondary dwelling)">
+                    <BoolToggleRow
+                      label="Has any suite"
+                      value={filters.suiteYn}
+                      onChange={(v) => updateFilter("suiteYn", v)}
+                    />
+                    <BoolToggleRow
+                      label="Legal suite only"
+                      value={filters.legalSuiteYn}
+                      onChange={(v) => updateFilter("legalSuiteYn", v)}
+                    />
+                    <FilterRow label="Suite location (comma-separated)">
+                      <Input
+                        value={filters.suiteLocations}
+                        onChange={(e) => updateFilter("suiteLocations", e.target.value)}
+                        className="h-11"
+                        placeholder="e.g. Basement, Above Garage, Main Level"
+                      />
+                      <p className="text-[11px] text-muted-foreground mt-1.5 leading-relaxed">
+                        Substring match against the SuiteLocation field. Listings matching ANY entry come back.
+                      </p>
+                    </FilterRow>
                   </FilterSection>
 
                   {/* BASEMENT + GARAGE FEATURES */}

@@ -129,6 +129,9 @@ function normalizeListing(row: Record<string, string>): InsertMlsListing | null 
     inclusions: rawText(row.Inclusions) ?? undefined,
     exclusions: rawText(row.Exclusions) ?? undefined,
     zoning: rawText(row.Zoning) ?? undefined,
+    suite: rawText(row.Suite) ?? undefined,
+    legalSuiteYn: rawBool(row.LegalSuiteYN) ?? undefined,
+    suiteLocation: rawText(row.SuiteLocation) ?? undefined,
   } as any;
 }
 
@@ -182,6 +185,9 @@ const SELECT_FIELDS = [
   "Inclusions",
   "Exclusions",
   "Zoning",
+  "Suite",
+  "LegalSuiteYN",
+  "SuiteLocation",
   "DaysOnMarket",
   "ListDate",
   "LotSizeAcres",

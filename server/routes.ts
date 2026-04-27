@@ -426,6 +426,9 @@ export async function registerRoutes(
       poolYn: q.poolYn != null ? bool(q.poolYn) : undefined,
       waterfrontYn: q.waterfrontYn != null ? bool(q.waterfrontYn) : undefined,
       airConditioned: q.airConditioned != null ? bool(q.airConditioned) : undefined,
+      suiteYn: q.suiteYn != null ? bool(q.suiteYn) : undefined,
+      legalSuiteYn: q.legalSuiteYn != null ? bool(q.legalSuiteYn) : undefined,
+      suiteLocations: list(q.suiteLocations),
       // Multi-value structured filters — match if ANY value appears in the
       // listing's RETS string (so basement=Walkout&basement=Finished returns
       // listings that have either Walkout or Finished in their basement field).

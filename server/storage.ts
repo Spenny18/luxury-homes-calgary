@@ -309,6 +309,9 @@ try {
       ["inclusions", "TEXT"],
       ["exclusions", "TEXT"],
       ["zoning", "TEXT"],
+      ["suite", "TEXT"],
+      ["legal_suite_yn", "INTEGER"],
+      ["suite_location", "TEXT"],
     ];
     for (const [name, type] of additions) {
       if (!existing.has(name)) {
@@ -586,6 +589,9 @@ export class DatabaseStorage implements IStorage {
     poolYn?: boolean;
     waterfrontYn?: boolean;
     airConditioned?: boolean;
+    suiteYn?: boolean;
+    legalSuiteYn?: boolean;
+    suiteLocations?: string[];
     basements?: string[];
     basementDevelopments?: string[];
     parkingFeatures?: string[];
@@ -647,6 +653,31 @@ export class DatabaseStorage implements IStorage {
         );
       }
     }
+    if (opts.suiteYn != null) {
+      // Pillar 9's `Suite` field varies — sometimes "Yes/No", sometimes a
+      // descriptive list ("Walk-Up, Separate Entrance"). Treat any non-"No",
+      // non-empty value as "has a suite".
+      if (opts.suiteYn) {
+        where.push(
+          and(
+            sql`${mlsListings.suite} IS NOT NULL`,
+            sql`${mlsListings.suite} != ''`,
+            sql`LOWER(${mlsListings.suite}) NOT LIKE 'no%'`,
+            sql`LOWER(${mlsListings.suite}) NOT LIKE 'none%'`,
+          )!,
+        );
+      } else {
+        where.push(
+          or(
+            sql`${mlsListings.suite} IS NULL`,
+            eq(mlsListings.suite, ""),
+            like(sql`LOWER(${mlsListings.suite})`, "no%"),
+            like(sql`LOWER(${mlsListings.suite})`, "none%"),
+          )!,
+        );
+      }
+    }
+    if (opts.legalSuiteYn != null) where.push(eq(mlsListings.legalSuiteYn, opts.legalSuiteYn));
     // For each multi-value list filter, listing matches if ANY of the
     // selected values appears in its RETS string (substring match).
     const matchesAny = (col: any, vals?: string[]) => {
@@ -668,6 +699,7 @@ export class DatabaseStorage implements IStorage {
       matchesAny(mlsListings.view, opts.views),
       matchesAny(mlsListings.subdivision, opts.subdivisions),
       matchesAny(mlsListings.district, opts.districts),
+      matchesAny(mlsListings.suiteLocation, opts.suiteLocations),
     ];
     for (const f of orFilters) {
       if (f) where.push(f);

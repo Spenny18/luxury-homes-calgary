@@ -216,6 +216,9 @@ export const mlsListings = sqliteTable("mls_listings", {
   inclusions: text("inclusions"),
   exclusions: text("exclusions"),
   zoning: text("zoning"),
+  suite: text("suite"),
+  legalSuiteYn: integer("legal_suite_yn", { mode: "boolean" }),
+  suiteLocation: text("suite_location"),
   // ---- /structured fields ----
   // Listing meta
   listDate: text("list_date"),
