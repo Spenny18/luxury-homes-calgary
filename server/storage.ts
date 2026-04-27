@@ -534,10 +534,18 @@ export class DatabaseStorage implements IStorage {
     beds?: number; // minimum
     baths?: number; // minimum
     propertyType?: string;
+    propertySubType?: string;
     neighbourhood?: string;
+    postalCode?: string;
     status?: string;
     minSqft?: number;
     maxSqft?: number;
+    yearMin?: number;
+    yearMax?: number;
+    garageMin?: number;
+    domMax?: number;
+    hasPhotos?: boolean;
+    keywords?: string; // comma-separated; ALL must appear in description
     sort?: "price-asc" | "price-desc" | "newest" | "sqft-desc";
     limit?: number;
     offset?: number;
@@ -548,10 +556,17 @@ export class DatabaseStorage implements IStorage {
     if (opts.beds) where.push(gte(mlsListings.beds, opts.beds));
     if (opts.baths) where.push(gte(mlsListings.baths, opts.baths));
     if (opts.propertyType && opts.propertyType !== "Any") where.push(eq(mlsListings.propertyType, opts.propertyType));
+    if (opts.propertySubType && opts.propertySubType !== "Any") where.push(eq(mlsListings.propertySubType, opts.propertySubType));
     if (opts.neighbourhood) where.push(eq(mlsListings.neighbourhood, opts.neighbourhood));
+    if (opts.postalCode) where.push(like(mlsListings.postalCode, `${opts.postalCode.toUpperCase()}%`));
     if (opts.status) where.push(eq(mlsListings.status, opts.status));
     if (opts.minSqft) where.push(gte(mlsListings.sqft, opts.minSqft));
     if (opts.maxSqft) where.push(lte(mlsListings.sqft, opts.maxSqft));
+    if (opts.yearMin) where.push(gte(mlsListings.yearBuilt, opts.yearMin));
+    if (opts.yearMax) where.push(lte(mlsListings.yearBuilt, opts.yearMax));
+    if (opts.garageMin) where.push(gte(mlsListings.garageSpaces, opts.garageMin));
+    if (opts.domMax != null) where.push(lte(mlsListings.daysOnMarket, opts.domMax));
+    if (opts.hasPhotos) where.push(gte(mlsListings.photoCount, 1));
     if (opts.q) {
       const q = `%${opts.q}%`;
       where.push(
@@ -562,6 +577,18 @@ export class DatabaseStorage implements IStorage {
           like(mlsListings.description, q),
         )!,
       );
+    }
+    if (opts.keywords) {
+      // Split on commas, trim, drop empties. ALL keywords must appear in
+      // description (case-insensitive) — gives buyers a way to find specific
+      // features like "double garage, walkout basement, ensuite laundry".
+      const terms = opts.keywords
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+      for (const term of terms) {
+        where.push(like(mlsListings.description, `%${term}%`));
+      }
     }
     let qb: any = db.select().from(mlsListings);
     if (where.length) qb = qb.where(and(...where));

@@ -392,17 +392,27 @@ export async function registerRoutes(
   app.get("/api/public/mls/search", (req, res) => {
     const q = req.query;
     const num = (v: any) => (v != null && v !== "" ? Number(v) : undefined);
+    const str = (v: any) => (typeof v === "string" && v.length ? v : undefined);
+    const bool = (v: any) => v === "true" || v === "1";
     const result = storage.searchMlsListings({
-      q: typeof q.q === "string" ? q.q : undefined,
+      q: str(q.q),
       minPrice: num(q.minPrice),
       maxPrice: num(q.maxPrice),
       beds: num(q.beds),
       baths: num(q.baths),
-      propertyType: typeof q.propertyType === "string" ? q.propertyType : undefined,
-      neighbourhood: typeof q.neighbourhood === "string" ? q.neighbourhood : undefined,
-      status: (typeof q.status === "string" ? q.status : "Active") || "Active",
+      propertyType: str(q.propertyType),
+      propertySubType: str(q.propertySubType),
+      neighbourhood: str(q.neighbourhood),
+      postalCode: str(q.postalCode),
+      status: str(q.status) ?? "Active",
       minSqft: num(q.minSqft),
       maxSqft: num(q.maxSqft),
+      yearMin: num(q.yearMin),
+      yearMax: num(q.yearMax),
+      garageMin: num(q.garageMin),
+      domMax: num(q.domMax),
+      hasPhotos: bool(q.hasPhotos),
+      keywords: str(q.keywords),
       sort: q.sort as any,
       limit: num(q.limit) ?? 24,
       offset: num(q.offset) ?? 0,

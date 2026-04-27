@@ -66,8 +66,17 @@ interface Filters {
   beds: string;
   baths: string;
   propertyType: string;
+  propertySubType: string;
   neighbourhood: string;
+  postalCode: string;
   minSqft: string;
+  maxSqft: string;
+  yearMin: string;
+  yearMax: string;
+  garageMin: string;
+  domMax: string;
+  hasPhotos: string; // "" or "true"
+  keywords: string;
   status: string;
   sort: string;
 }
@@ -79,18 +88,49 @@ const DEFAULT_FILTERS: Filters = {
   beds: "any",
   baths: "any",
   propertyType: "any",
+  propertySubType: "any",
   neighbourhood: "any",
+  postalCode: "",
   minSqft: "",
+  maxSqft: "",
+  yearMin: "",
+  yearMax: "",
+  garageMin: "any",
+  domMax: "any",
+  hasPhotos: "",
+  keywords: "",
   status: "Active",
   sort: "newest",
 };
+
+const PROPERTY_SUBTYPES = [
+  { value: "any", label: "Any sub-type" },
+  { value: "Detached", label: "Detached" },
+  { value: "Semi-Detached", label: "Semi-Detached" },
+  { value: "Row/Townhouse", label: "Row / Townhouse" },
+  { value: "Apartment", label: "Apartment" },
+  { value: "Condo", label: "Condo" },
+  { value: "Duplex", label: "Duplex" },
+];
+
+const DOM_OPTIONS = [
+  { value: "any", label: "Any time on market" },
+  { value: "3", label: "≤ 3 days (just listed)" },
+  { value: "7", label: "≤ 7 days" },
+  { value: "14", label: "≤ 14 days" },
+  { value: "30", label: "≤ 30 days" },
+  { value: "60", label: "≤ 60 days" },
+  { value: "90", label: "≤ 90 days" },
+];
 
 function parseQuery(qs: string): Partial<Filters> {
   const params = new URLSearchParams(qs.startsWith("?") ? qs.slice(1) : qs);
   const out: Partial<Filters> = {};
   const map: (keyof Filters)[] = [
     "q", "minPrice", "maxPrice", "beds", "baths",
-    "propertyType", "neighbourhood", "minSqft", "status", "sort",
+    "propertyType", "propertySubType", "neighbourhood", "postalCode",
+    "minSqft", "maxSqft", "yearMin", "yearMax", "garageMin", "domMax",
+    "hasPhotos", "keywords", "status", "sort",
   ];
   for (const k of map) {
     const v = params.get(k);
@@ -266,8 +306,11 @@ export default function MlsSearchPage() {
     setPage(0);
   }, [
     filters.q, filters.minPrice, filters.maxPrice, filters.beds,
-    filters.baths, filters.propertyType, filters.neighbourhood,
-    filters.minSqft, filters.status, filters.sort,
+    filters.baths, filters.propertyType, filters.propertySubType,
+    filters.neighbourhood, filters.postalCode, filters.minSqft,
+    filters.maxSqft, filters.yearMin, filters.yearMax, filters.garageMin,
+    filters.domMax, filters.hasPhotos, filters.keywords, filters.status,
+    filters.sort,
   ]);
 
   useEffect(() => {
@@ -293,9 +336,20 @@ export default function MlsSearchPage() {
     if (filters.baths && filters.baths !== "any") p.set("baths", filters.baths);
     if (filters.propertyType && filters.propertyType !== "any")
       p.set("propertyType", filters.propertyType);
+    if (filters.propertySubType && filters.propertySubType !== "any")
+      p.set("propertySubType", filters.propertySubType);
     if (filters.neighbourhood && filters.neighbourhood !== "any")
       p.set("neighbourhood", filters.neighbourhood);
+    if (filters.postalCode) p.set("postalCode", filters.postalCode);
     if (filters.minSqft) p.set("minSqft", filters.minSqft);
+    if (filters.maxSqft) p.set("maxSqft", filters.maxSqft);
+    if (filters.yearMin) p.set("yearMin", filters.yearMin);
+    if (filters.yearMax) p.set("yearMax", filters.yearMax);
+    if (filters.garageMin && filters.garageMin !== "any")
+      p.set("garageMin", filters.garageMin);
+    if (filters.domMax && filters.domMax !== "any") p.set("domMax", filters.domMax);
+    if (filters.hasPhotos === "true") p.set("hasPhotos", "true");
+    if (filters.keywords) p.set("keywords", filters.keywords);
     if (filters.status) p.set("status", filters.status);
     if (filters.sort) p.set("sort", filters.sort);
     p.set("limit", String(PAGE_SIZE));
@@ -332,8 +386,17 @@ export default function MlsSearchPage() {
     if (filters.beds !== "any") n++;
     if (filters.baths !== "any") n++;
     if (filters.propertyType !== "any") n++;
+    if (filters.propertySubType !== "any") n++;
     if (filters.neighbourhood !== "any") n++;
+    if (filters.postalCode) n++;
     if (filters.minSqft) n++;
+    if (filters.maxSqft) n++;
+    if (filters.yearMin) n++;
+    if (filters.yearMax) n++;
+    if (filters.garageMin !== "any") n++;
+    if (filters.domMax !== "any") n++;
+    if (filters.hasPhotos === "true") n++;
+    if (filters.keywords) n++;
     if (filters.status !== "Active") n++;
     return n;
   }, [filters]);
@@ -623,31 +686,153 @@ export default function MlsSearchPage() {
                     )}
                   </button>
                 </SheetTrigger>
-                <SheetContent side="right" className="w-full sm:w-[420px] overflow-y-auto">
+                <SheetContent side="right" className="w-full sm:w-[440px] overflow-y-auto">
                   <div className="font-display text-xs tracking-[0.22em] mb-6">REFINE SEARCH</div>
-                  <div className="space-y-5">
-                    <FilterRow label="Min price">
-                      <Input
-                        inputMode="numeric"
-                        value={filters.minPrice}
-                        onChange={(e) =>
-                          updateFilter("minPrice", e.target.value.replace(/[^\d]/g, ""))
-                        }
-                        className="h-11 tabular-nums"
-                        placeholder="$"
-                      />
+
+                  {/* PRICE */}
+                  <FilterSection title="Price">
+                    <div className="grid grid-cols-2 gap-3">
+                      <FilterRow label="Min price" inline>
+                        <Input
+                          inputMode="numeric"
+                          value={filters.minPrice}
+                          onChange={(e) =>
+                            updateFilter("minPrice", e.target.value.replace(/[^\d]/g, ""))
+                          }
+                          className="h-11 tabular-nums"
+                          placeholder="$"
+                        />
+                      </FilterRow>
+                      <FilterRow label="Max price" inline>
+                        <Input
+                          inputMode="numeric"
+                          value={filters.maxPrice}
+                          onChange={(e) =>
+                            updateFilter("maxPrice", e.target.value.replace(/[^\d]/g, ""))
+                          }
+                          className="h-11 tabular-nums"
+                          placeholder="$"
+                        />
+                      </FilterRow>
+                    </div>
+                  </FilterSection>
+
+                  {/* SIZE */}
+                  <FilterSection title="Size & age">
+                    <div className="grid grid-cols-2 gap-3">
+                      <FilterRow label="Min sqft" inline>
+                        <Input
+                          inputMode="numeric"
+                          value={filters.minSqft}
+                          onChange={(e) =>
+                            updateFilter("minSqft", e.target.value.replace(/[^\d]/g, ""))
+                          }
+                          className="h-11 tabular-nums"
+                          placeholder="2,500"
+                        />
+                      </FilterRow>
+                      <FilterRow label="Max sqft" inline>
+                        <Input
+                          inputMode="numeric"
+                          value={filters.maxSqft}
+                          onChange={(e) =>
+                            updateFilter("maxSqft", e.target.value.replace(/[^\d]/g, ""))
+                          }
+                          className="h-11 tabular-nums"
+                          placeholder="—"
+                        />
+                      </FilterRow>
+                      <FilterRow label="Year built (min)" inline>
+                        <Input
+                          inputMode="numeric"
+                          value={filters.yearMin}
+                          onChange={(e) =>
+                            updateFilter("yearMin", e.target.value.replace(/[^\d]/g, "").slice(0, 4))
+                          }
+                          className="h-11 tabular-nums"
+                          placeholder="e.g. 2000"
+                        />
+                      </FilterRow>
+                      <FilterRow label="Year built (max)" inline>
+                        <Input
+                          inputMode="numeric"
+                          value={filters.yearMax}
+                          onChange={(e) =>
+                            updateFilter("yearMax", e.target.value.replace(/[^\d]/g, "").slice(0, 4))
+                          }
+                          className="h-11 tabular-nums"
+                          placeholder="—"
+                        />
+                      </FilterRow>
+                    </div>
+                  </FilterSection>
+
+                  {/* PROPERTY */}
+                  <FilterSection title="Property">
+                    <FilterRow label="Sub-type">
+                      <Select
+                        value={filters.propertySubType}
+                        onValueChange={(v) => updateFilter("propertySubType", v)}
+                      >
+                        <SelectTrigger className="h-11">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PROPERTY_SUBTYPES.map((p) => (
+                            <SelectItem key={p.value} value={p.value}>
+                              {p.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </FilterRow>
-                    <FilterRow label="Max price">
-                      <Input
-                        inputMode="numeric"
-                        value={filters.maxPrice}
-                        onChange={(e) =>
-                          updateFilter("maxPrice", e.target.value.replace(/[^\d]/g, ""))
-                        }
-                        className="h-11 tabular-nums"
-                        placeholder="$"
-                      />
+                    <FilterRow label="Garage spaces (min)">
+                      <Select
+                        value={filters.garageMin}
+                        onValueChange={(v) => updateFilter("garageMin", v)}
+                      >
+                        <SelectTrigger className="h-11">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="any">Any</SelectItem>
+                          <SelectItem value="1">1+ spaces</SelectItem>
+                          <SelectItem value="2">2+ spaces (double)</SelectItem>
+                          <SelectItem value="3">3+ spaces</SelectItem>
+                          <SelectItem value="4">4+ spaces</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </FilterRow>
+                    <FilterRow label="Time on market">
+                      <Select
+                        value={filters.domMax}
+                        onValueChange={(v) => updateFilter("domMax", v)}
+                      >
+                        <SelectTrigger className="h-11">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {DOM_OPTIONS.map((d) => (
+                            <SelectItem key={d.value} value={d.value}>
+                              {d.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FilterRow>
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded-sm border-border"
+                        checked={filters.hasPhotos === "true"}
+                        onChange={(e) => updateFilter("hasPhotos", e.target.checked ? "true" : "")}
+                      />
+                      Only listings with photos
+                    </label>
+                  </FilterSection>
+
+                  {/* LOCATION */}
+                  <FilterSection title="Location">
                     <FilterRow label="Neighbourhood">
                       <Select
                         value={filters.neighbourhood}
@@ -666,18 +851,38 @@ export default function MlsSearchPage() {
                         </SelectContent>
                       </Select>
                     </FilterRow>
-                    <FilterRow label="Minimum sqft">
+                    <FilterRow label="Postal code (prefix)">
                       <Input
-                        inputMode="numeric"
-                        value={filters.minSqft}
+                        value={filters.postalCode}
                         onChange={(e) =>
-                          updateFilter("minSqft", e.target.value.replace(/[^\d]/g, ""))
+                          updateFilter("postalCode", e.target.value.toUpperCase().replace(/\s/g, "").slice(0, 6))
                         }
-                        className="h-11 tabular-nums"
-                        placeholder="e.g. 2500"
+                        className="h-11 tabular-nums uppercase"
+                        placeholder="e.g. T2T or T3H"
                       />
                     </FilterRow>
-                    <FilterRow label="Status">
+                  </FilterSection>
+
+                  {/* KEYWORDS */}
+                  <FilterSection title="Features (description match)">
+                    <FilterRow label="Must contain (comma-separated)">
+                      <Input
+                        value={filters.keywords}
+                        onChange={(e) => updateFilter("keywords", e.target.value)}
+                        className="h-11"
+                        placeholder="e.g. walkout, double garage, ensuite"
+                      />
+                    </FilterRow>
+                    <p className="text-[11px] text-muted-foreground mt-1.5 leading-relaxed">
+                      All terms must appear in the listing description. Useful for things not in
+                      structured data — basement type, laundry location, garage details, finishes,
+                      view, etc.
+                    </p>
+                  </FilterSection>
+
+                  {/* STATUS */}
+                  <FilterSection title="Status">
+                    <FilterRow label="Listing status">
                       <Select
                         value={filters.status}
                         onValueChange={(v) => updateFilter("status", v)}
@@ -694,14 +899,15 @@ export default function MlsSearchPage() {
                         </SelectContent>
                       </Select>
                     </FilterRow>
-                    <div className="pt-4 flex items-center gap-3">
-                      <Button onClick={resetFilters} variant="outline" className="flex-1">
-                        Reset
-                      </Button>
-                      <Button onClick={() => setFiltersOpen(false)} className="flex-1">
-                        Apply
-                      </Button>
-                    </div>
+                  </FilterSection>
+
+                  <div className="pt-4 flex items-center gap-3">
+                    <Button onClick={resetFilters} variant="outline" className="flex-1">
+                      Reset
+                    </Button>
+                    <Button onClick={() => setFiltersOpen(false)} className="flex-1">
+                      Apply
+                    </Button>
                   </div>
                 </SheetContent>
               </Sheet>
@@ -818,13 +1024,32 @@ export default function MlsSearchPage() {
   );
 }
 
-function FilterRow({ label, children }: { label: string; children: React.ReactNode }) {
+function FilterRow({
+  label,
+  children,
+  inline = false,
+}: {
+  label: string;
+  children: React.ReactNode;
+  inline?: boolean;
+}) {
   return (
-    <div>
+    <div className={inline ? "" : "mb-3"}>
       <div className="font-display text-[10px] tracking-[0.22em] text-muted-foreground mb-2">
         {label.toUpperCase()}
       </div>
       {children}
+    </div>
+  );
+}
+
+function FilterSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-6 pb-5 border-b border-border last:border-b-0 last:mb-0 last:pb-0">
+      <div className="font-display text-[11px] tracking-[0.22em] text-foreground mb-3">
+        {title.toUpperCase()}
+      </div>
+      <div className="space-y-3">{children}</div>
     </div>
   );
 }
