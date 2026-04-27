@@ -46,9 +46,20 @@ import { eq, desc, and, gte, lte, like, sql, or, asc } from "drizzle-orm";
 // Use data.db for SQLite. The publish flow snapshots/restores `data.db` across
 // redeploys. If the snapshot becomes corrupt ("database disk image is
 // malformed"), fall back to a fresh file so seed() + RETS sync can rebuild it.
+//
+// In production hosts where the working directory is read-only or wiped on each
+// deploy (Fly.io, Render, etc.) set DB_PATH to a path on a persistent volume,
+// e.g. DB_PATH=/data/rivers.db.
 import fs from "node:fs";
+import nodePath from "node:path";
 function openDb(): InstanceType<typeof Database> {
-  const path = "data.db";
+  const path = process.env.DB_PATH || "data.db";
+  try {
+    const dir = nodePath.dirname(path);
+    if (dir && dir !== "." && !fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  } catch {}
   try {
     const db = new Database(path);
     // Probe for corruption with a cheap PRAGMA quick_check
