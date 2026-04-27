@@ -4,7 +4,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { MapContainer, TileLayer, Marker, CircleMarker, Tooltip, Circle } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, CircleMarker, Tooltip, Circle, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
@@ -875,6 +875,52 @@ function colorFor(cat: CatId): string {
   return POI_CATEGORIES.find((c) => c.id === cat)?.color ?? "#23412d";
 }
 
+// Reusable route shape returned by /api/route
+type RouteResult = {
+  profile: string;
+  distance: number; // meters
+  duration: number; // seconds
+  geometry: { type: "LineString"; coordinates: [number, number][] };
+};
+
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "—";
+  const mins = Math.round(seconds / 60);
+  if (mins < 1) return "<1 min";
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
+}
+
+function formatDistanceKm(meters: number): string {
+  if (!Number.isFinite(meters) || meters < 0) return "—";
+  if (meters < 1000) return `${Math.round(meters)} m`;
+  return `${(meters / 1000).toFixed(meters < 10000 ? 1 : 0)} km`;
+}
+
+// Auto-fits the map to a route's bounding box so the user can see the whole path.
+function FitToRoute({
+  coords,
+  fallback,
+}: {
+  coords: [number, number][] | null;
+  fallback: [number, number];
+}) {
+  const map = useMap();
+  useEffect(() => {
+    if (!coords || coords.length === 0) {
+      // Reset view to the property when no route is selected.
+      map.setView(fallback, 15);
+      return;
+    }
+    // OSRM returns coordinates as [lng, lat] — Leaflet expects [lat, lng].
+    const latlngs = coords.map(([lng, lat]) => [lat, lng] as [number, number]);
+    map.fitBounds(latlngs, { padding: [40, 40], maxZoom: 16 });
+  }, [coords, fallback, map]);
+  return null;
+}
+
 function NeighbourhoodPois({
   listingId,
   lat,
@@ -885,6 +931,7 @@ function NeighbourhoodPois({
   lng: number;
 }) {
   const [active, setActive] = useState<CatId>("all");
+  const [selectedPoi, setSelectedPoi] = useState<Poi | null>(null);
   const { data, isLoading } = useQuery<PoisPayload>({
     queryKey: ["/api/mls", listingId, "pois"],
     queryFn: async () => {
@@ -921,6 +968,40 @@ function NeighbourhoodPois({
   for (const p of visible.parks) list.push({ poi: p, cat: "parks" });
   for (const p of visible.transit) list.push({ poi: p, cat: "transit" });
   list.sort((a, b) => a.poi.distance - b.poi.distance);
+
+  // Walking + driving routes from the property to the selected POI.
+  const walkRoute = useQuery<RouteResult>({
+    queryKey: ["/api/route", lat, lng, selectedPoi?.id, "foot"],
+    enabled: !!selectedPoi,
+    queryFn: async () => {
+      const url = apiUrl(
+        `/api/route?fromLat=${lat}&fromLng=${lng}&toLat=${selectedPoi!.lat}&toLng=${selectedPoi!.lng}&profile=foot`,
+      );
+      const r = await fetch(url);
+      if (!r.ok) throw new Error("walking route unavailable");
+      return r.json();
+    },
+    staleTime: 1000 * 60 * 60,
+  });
+  const driveRoute = useQuery<RouteResult>({
+    queryKey: ["/api/route", lat, lng, selectedPoi?.id, "driving"],
+    enabled: !!selectedPoi,
+    queryFn: async () => {
+      const url = apiUrl(
+        `/api/route?fromLat=${lat}&fromLng=${lng}&toLat=${selectedPoi!.lat}&toLng=${selectedPoi!.lng}&profile=driving`,
+      );
+      const r = await fetch(url);
+      if (!r.ok) throw new Error("driving route unavailable");
+      return r.json();
+    },
+    staleTime: 1000 * 60 * 60,
+  });
+
+  // Combined coordinate set for fitting bounds — picks whichever route loaded first.
+  const fitCoords =
+    walkRoute.data?.geometry.coordinates ??
+    driveRoute.data?.geometry.coordinates ??
+    null;
 
   return (
     <div className="mt-12">
@@ -972,7 +1053,7 @@ function NeighbourhoodPois({
 
       <div className="mt-5 grid grid-cols-1 lg:grid-cols-5 gap-4">
         {/* Map */}
-        <div className="lg:col-span-3 rounded-sm overflow-hidden border border-border aspect-[4/3] lg:aspect-auto lg:h-[460px] bg-secondary">
+        <div className="lg:col-span-3 relative rounded-sm overflow-hidden border border-border aspect-[4/3] lg:aspect-auto lg:h-[460px] bg-secondary">
           <MapContainer
             center={[lat, lng]}
             zoom={15}
@@ -995,6 +1076,36 @@ function NeighbourhoodPois({
               }}
             />
             <Marker position={[lat, lng]} icon={propertyIcon} />
+
+            {/* Driving route — solid blue line under walking */}
+            {selectedPoi && driveRoute.data && (
+              <Polyline
+                positions={driveRoute.data.geometry.coordinates.map(
+                  ([lng, lat]) => [lat, lng] as [number, number],
+                )}
+                pathOptions={{
+                  color: "#2563eb",
+                  weight: 5,
+                  opacity: 0.85,
+                }}
+              />
+            )}
+
+            {/* Walking route — dashed forest-green line on top */}
+            {selectedPoi && walkRoute.data && (
+              <Polyline
+                positions={walkRoute.data.geometry.coordinates.map(
+                  ([lng, lat]) => [lat, lng] as [number, number],
+                )}
+                pathOptions={{
+                  color: "#23412d",
+                  weight: 4,
+                  opacity: 1,
+                  dashArray: "6 6",
+                }}
+              />
+            )}
+
             {(
               [
                 ["schools", visible.schools],
@@ -1003,34 +1114,123 @@ function NeighbourhoodPois({
                 ["transit", visible.transit],
               ] as [CatId, Poi[]][]
             ).flatMap(([cat, arr]) =>
-              arr.map((p) => (
-                <CircleMarker
-                  key={`${cat}-${p.id}`}
-                  center={[p.lat, p.lng]}
-                  radius={6}
-                  pathOptions={{
-                    color: "#fff",
-                    weight: 2,
-                    fillColor: colorFor(cat),
-                    fillOpacity: 1,
-                  }}
+              arr.map((p) => {
+                const isSelected = selectedPoi?.id === p.id;
+                return (
+                  <CircleMarker
+                    key={`${cat}-${p.id}`}
+                    center={[p.lat, p.lng]}
+                    radius={isSelected ? 9 : 6}
+                    pathOptions={{
+                      color: isSelected ? "#0a0a0a" : "#fff",
+                      weight: isSelected ? 3 : 2,
+                      fillColor: colorFor(cat),
+                      fillOpacity: 1,
+                    }}
+                    eventHandlers={{
+                      click: () =>
+                        setSelectedPoi((prev) => (prev?.id === p.id ? null : p)),
+                    }}
+                  >
+                    <Tooltip direction="top" offset={[0, -6]} opacity={1}>
+                      <div className="text-[11px]">
+                        <div className="font-medium">{p.name}</div>
+                        <div className="text-muted-foreground tabular-nums">
+                          {p.distance < 1000
+                            ? `${p.distance} m`
+                            : `${(p.distance / 1000).toFixed(1)} km`}
+                          {" · "}
+                          {p.kind}
+                          {!isSelected && (
+                            <span className="block text-[9px] tracking-[0.18em] uppercase mt-0.5 opacity-70">
+                              Click for routes
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </Tooltip>
+                  </CircleMarker>
+                );
+              }),
+            )}
+
+            <FitToRoute coords={fitCoords} fallback={[lat, lng]} />
+          </MapContainer>
+
+          {/* Floating route-info panel — only shows when a POI is selected */}
+          {selectedPoi && (
+            <div
+              className="absolute top-3 left-3 right-3 lg:right-auto lg:max-w-[280px] z-[400] bg-white/95 dark:bg-background/95 backdrop-blur rounded-sm border border-border shadow-lg p-3 pointer-events-auto"
+              data-testid="poi-route-panel"
+            >
+              <div className="flex items-start gap-2 mb-2">
+                <div className="flex-1 min-w-0">
+                  <div className="eyebrow text-muted-foreground">Route to</div>
+                  <div
+                    className="font-serif text-[15px] leading-tight truncate"
+                    style={{ letterSpacing: "-0.005em" }}
+                  >
+                    {selectedPoi.name}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setSelectedPoi(null)}
+                  aria-label="Clear route"
+                  className="shrink-0 rounded-sm border border-border h-6 w-6 inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition"
                 >
-                  <Tooltip direction="top" offset={[0, -6]} opacity={1}>
-                    <div className="text-[11px]">
-                      <div className="font-medium">{p.name}</div>
-                      <div className="text-muted-foreground tabular-nums">
-                        {p.distance < 1000
-                          ? `${p.distance} m`
-                          : `${(p.distance / 1000).toFixed(1)} km`}
-                        {" · "}
-                        {p.kind}
+                  ×
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-[12px]">
+                <div className="rounded-sm bg-secondary/60 px-2.5 py-2">
+                  <div className="font-display tracking-[0.16em] text-[9px] text-muted-foreground mb-0.5">
+                    🚶 WALK
+                  </div>
+                  {walkRoute.isLoading ? (
+                    <div className="text-muted-foreground italic text-[11px]">Calculating…</div>
+                  ) : walkRoute.data ? (
+                    <div>
+                      <div className="font-medium">
+                        {formatDuration(walkRoute.data.duration)}
+                      </div>
+                      <div className="text-muted-foreground tabular-nums text-[11px]">
+                        {formatDistanceKm(walkRoute.data.distance)}
                       </div>
                     </div>
-                  </Tooltip>
-                </CircleMarker>
-              )),
-            )}
-          </MapContainer>
+                  ) : (
+                    <div className="text-muted-foreground italic text-[11px]">Unavailable</div>
+                  )}
+                </div>
+                <div className="rounded-sm bg-secondary/60 px-2.5 py-2">
+                  <div className="font-display tracking-[0.16em] text-[9px] text-muted-foreground mb-0.5">
+                    🚗 DRIVE
+                  </div>
+                  {driveRoute.isLoading ? (
+                    <div className="text-muted-foreground italic text-[11px]">Calculating…</div>
+                  ) : driveRoute.data ? (
+                    <div>
+                      <div className="font-medium">
+                        {formatDuration(driveRoute.data.duration)}
+                      </div>
+                      <div className="text-muted-foreground tabular-nums text-[11px]">
+                        {formatDistanceKm(driveRoute.data.distance)}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-muted-foreground italic text-[11px]">Unavailable</div>
+                  )}
+                </div>
+              </div>
+              <a
+                href={`https://www.google.com/maps/dir/?api=1&origin=${lat},${lng}&destination=${selectedPoi.lat},${selectedPoi.lng}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 block text-center font-display tracking-[0.18em] text-[10px] py-1.5 border border-border rounded-sm hover:bg-secondary transition"
+              >
+                OPEN IN GOOGLE MAPS
+              </a>
+            </div>
+          )}
         </div>
 
         {/* List of nearby POIs sorted by distance */}
@@ -1044,7 +1244,12 @@ function NeighbourhoodPois({
             {list.slice(0, 60).map((row) => (
               <li
                 key={`${row.cat}-${row.poi.id}`}
-                className="px-4 py-3 flex items-start gap-3 hover:bg-secondary/40 transition-colors"
+                onClick={() =>
+                  setSelectedPoi((prev) => (prev?.id === row.poi.id ? null : row.poi))
+                }
+                className={`px-4 py-3 flex items-start gap-3 transition-colors cursor-pointer ${
+                  selectedPoi?.id === row.poi.id ? "bg-secondary/70" : "hover:bg-secondary/40"
+                }`}
                 data-testid={`poi-row-${row.poi.id}`}
               >
                 <span

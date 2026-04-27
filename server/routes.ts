@@ -771,6 +771,69 @@ out center tags;`;
     }
   });
 
+  // ---------- ROUTING (OSRM) ----------
+  // GET /api/route?fromLat=..&fromLng=..&toLat=..&toLng=..&profile=foot|driving|bike
+  // Returns { distance (m), duration (s), geometry (GeoJSON LineString) }
+  app.get("/api/route", async (req, res) => {
+    const fromLat = parseFloat(String(req.query.fromLat ?? ""));
+    const fromLng = parseFloat(String(req.query.fromLng ?? ""));
+    const toLat = parseFloat(String(req.query.toLat ?? ""));
+    const toLng = parseFloat(String(req.query.toLng ?? ""));
+    const profile = String(req.query.profile ?? "foot");
+    if (![fromLat, fromLng, toLat, toLng].every((x) => Number.isFinite(x))) {
+      return res.status(400).json({ message: "Invalid coordinates" });
+    }
+    if (!["foot", "driving", "bike"].includes(profile)) {
+      return res.status(400).json({ message: "Invalid profile" });
+    }
+    // OSRM uses {lng},{lat} order. Multiple public mirrors fall back if main is rate-limited.
+    const OSRM_MIRRORS = [
+      "https://router.project-osrm.org",
+      "https://routing.openstreetmap.de/routed-foot",
+    ];
+    // The second mirror only handles foot — only try it for foot profile.
+    const mirrors = profile === "foot" ? OSRM_MIRRORS : [OSRM_MIRRORS[0]];
+    let lastError: string | null = null;
+    for (const base of mirrors) {
+      // For routing.openstreetmap.de, the profile is part of the host path.
+      // For project-osrm, it's part of the URL path.
+      const url = base.includes("routed-foot")
+        ? `${base}/route/v1/foot/${fromLng},${fromLat};${toLng},${toLat}?overview=full&geometries=geojson`
+        : `${base}/route/v1/${profile}/${fromLng},${fromLat};${toLng},${toLat}?overview=full&geometries=geojson`;
+      try {
+        const r = await fetch(url, {
+          headers: {
+            "Accept": "application/json",
+            "User-Agent": "RiversRealEstate/1.0 (https://luxuryhomescalgary.ca)",
+          },
+        });
+        if (!r.ok) {
+          lastError = `${base} -> ${r.status}`;
+          console.warn("[route] mirror failed:", lastError);
+          continue;
+        }
+        const data: any = await r.json();
+        if (data.code !== "Ok" || !data.routes?.[0]) {
+          lastError = `${base} -> code=${data.code}`;
+          console.warn("[route] mirror no route:", lastError);
+          continue;
+        }
+        const route = data.routes[0];
+        return res.json({
+          profile,
+          distance: route.distance, // meters
+          duration: route.duration, // seconds
+          geometry: route.geometry, // GeoJSON LineString
+        });
+      } catch (e: any) {
+        lastError = `${base} -> ${e?.message ?? "fetch failed"}`;
+        console.warn("[route] mirror error:", lastError);
+      }
+    }
+    console.error("[route] all OSRM mirrors failed:", lastError);
+    return res.status(502).json({ message: "Routing service unavailable", error: lastError });
+  });
+
   // ---------- SAVED SEARCHES (auth) ----------
   app.get("/api/saved-searches", requireAuth, (req, res) => {
     const userId = (req as any).authUserId as number;
