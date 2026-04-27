@@ -71,7 +71,6 @@ interface Filters {
   propertyType: string;
   propertySubTypes: string; // multi (csv)
   cities: string; // multi (csv)
-  neighbourhood: string;
   postalCode: string;
   minSqft: string;
   maxSqft: string;
@@ -118,7 +117,6 @@ const DEFAULT_FILTERS: Filters = {
   propertyType: "any",
   propertySubTypes: "",
   cities: "",
-  neighbourhood: "any",
   postalCode: "",
   minSqft: "",
   maxSqft: "",
@@ -363,7 +361,7 @@ function parseQuery(qs: string): Partial<Filters> {
   const out: Partial<Filters> = {};
   const map: (keyof Filters)[] = [
     "q", "minPrice", "maxPrice", "beds", "baths",
-    "propertyType", "propertySubTypes", "cities", "neighbourhood", "postalCode",
+    "propertyType", "propertySubTypes", "cities", "postalCode",
     "minSqft", "maxSqft", "yearMin", "yearMax", "garageMin", "domMax",
     "hasPhotos", "garageYn", "poolYn", "waterfrontYn", "airConditioned",
     "suiteYn", "legalSuiteYn", "suiteLocations",
@@ -571,8 +569,6 @@ export default function MlsSearchPage() {
       p.set("propertyType", filters.propertyType);
     if (filters.propertySubTypes) p.set("propertySubTypes", filters.propertySubTypes);
     if (filters.cities) p.set("cities", filters.cities);
-    if (filters.neighbourhood && filters.neighbourhood !== "any")
-      p.set("neighbourhood", filters.neighbourhood);
     if (filters.postalCode) p.set("postalCode", filters.postalCode);
     if (filters.minSqft) p.set("minSqft", filters.minSqft);
     if (filters.maxSqft) p.set("maxSqft", filters.maxSqft);
@@ -643,7 +639,6 @@ export default function MlsSearchPage() {
     if (filters.propertyType !== "any") n++;
     if (filters.propertySubTypes) n++;
     if (filters.cities) n++;
-    if (filters.neighbourhood !== "any") n++;
     if (filters.postalCode) n++;
     if (filters.minSqft) n++;
     if (filters.maxSqft) n++;
@@ -1252,23 +1247,21 @@ export default function MlsSearchPage() {
                         cols={2}
                       />
                     </FilterRow>
-                    <FilterRow label="Neighbourhood">
-                      <Select
-                        value={filters.neighbourhood}
-                        onValueChange={(v) => updateFilter("neighbourhood", v)}
-                      >
-                        <SelectTrigger className="h-11">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="any">Any neighbourhood</SelectItem>
-                          {(neighbourhoods ?? []).map((n) => (
-                            <SelectItem key={n.slug} value={n.name}>
-                              {n.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                    <FilterRow label="Subdivision (multi-select)">
+                      <SearchableCheckboxList
+                        field="subdivision"
+                        value={filters.subdivisions}
+                        onChange={(v) => updateFilter("subdivisions", v)}
+                        placeholder="Search subdivisions…"
+                      />
+                    </FilterRow>
+                    <FilterRow label="District (multi-select)">
+                      <SearchableCheckboxList
+                        field="district"
+                        value={filters.districts}
+                        onChange={(v) => updateFilter("districts", v)}
+                        placeholder="Search districts…"
+                      />
                     </FilterRow>
                     <FilterRow label="Postal code (prefix)">
                       <Input
@@ -1279,30 +1272,6 @@ export default function MlsSearchPage() {
                         className="h-11 tabular-nums uppercase"
                         placeholder="e.g. T2T or T3H"
                       />
-                    </FilterRow>
-                    <FilterRow label="Subdivision (comma-separated)">
-                      <Input
-                        value={filters.subdivisions}
-                        onChange={(e) => updateFilter("subdivisions", e.target.value)}
-                        className="h-11"
-                        placeholder="e.g. Aspen Woods, Mahogany, Auburn Bay"
-                      />
-                      <p className="text-[11px] text-muted-foreground mt-1.5 leading-relaxed">
-                        Substring match against the Pillar 9 SubdivisionName field.
-                        Listings matching ANY entry come back. Type partial names to broaden.
-                      </p>
-                    </FilterRow>
-                    <FilterRow label="District (comma-separated)">
-                      <Input
-                        value={filters.districts}
-                        onChange={(e) => updateFilter("districts", e.target.value)}
-                        className="h-11"
-                        placeholder="e.g. CAL Zone NW, City Centre, Foothills"
-                      />
-                      <p className="text-[11px] text-muted-foreground mt-1.5 leading-relaxed">
-                        Pillar 9 District field. Useful for quadrant + rural municipal
-                        boundaries. ANY-match across entries.
-                      </p>
                     </FilterRow>
                   </FilterSection>
 
@@ -1525,6 +1494,107 @@ function CheckboxGroup({
           </label>
         );
       })}
+    </div>
+  );
+}
+
+// Searchable checkbox list — fetches its options from /api/public/mls/distinct
+// for high-cardinality fields like subdivision and district (hundreds of values
+// across the Pillar 9 service area). Renders a search input + scrollable list.
+function SearchableCheckboxList({
+  field,
+  value,
+  onChange,
+  placeholder = "Search…",
+}: {
+  field: "subdivision" | "district";
+  value: string;
+  onChange: (next: string) => void;
+  placeholder?: string;
+}) {
+  const [search, setSearch] = useState("");
+  const { data, isLoading } = useQuery<{ values: string[] }>({
+    queryKey: ["/api/public/mls/distinct", field],
+    queryFn: async () => {
+      const r = await apiRequest("GET", `/api/public/mls/distinct?field=${field}`);
+      return r.json();
+    },
+    staleTime: 1000 * 60 * 5, // refetch every 5 min
+  });
+  const all = data?.values ?? [];
+  const selected = value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter((v) => v.toLowerCase().includes(q));
+  }, [all, search]);
+  return (
+    <div className="space-y-2">
+      <Input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder={placeholder}
+        className="h-9"
+      />
+      <div className="text-[11px] text-muted-foreground tabular-nums">
+        {isLoading
+          ? "Loading…"
+          : `${selected.length} selected · ${visible.length} of ${all.length} matches`}
+      </div>
+      <div className="max-h-[200px] overflow-y-auto border border-border rounded-sm divide-y divide-border">
+        {selected
+          .filter((s) => !visible.includes(s))
+          .map((s) => (
+            // Show currently-selected items that don't match the current
+            // search filter (so users can de-select without losing them).
+            <label
+              key={`pinned-${s}`}
+              className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[12px] bg-foreground/5"
+            >
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5 rounded-sm shrink-0"
+                checked
+                onChange={() => onChange(csvToggle(value, s))}
+              />
+              <span className="truncate">{s}</span>
+              <span className="ml-auto text-[10px] text-muted-foreground italic">selected</span>
+            </label>
+          ))}
+        {visible.length === 0 && !isLoading ? (
+          <div className="px-3 py-4 text-center text-[12px] text-muted-foreground">
+            No matches.
+          </div>
+        ) : (
+          visible.slice(0, 200).map((opt) => {
+            const checked = selected.includes(opt);
+            return (
+              <label
+                key={opt}
+                className={`flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[12px] transition-colors ${
+                  checked ? "bg-foreground/5" : "hover:bg-secondary/40"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 rounded-sm shrink-0"
+                  checked={checked}
+                  onChange={() => onChange(csvToggle(value, opt))}
+                />
+                <span className="truncate">{opt}</span>
+              </label>
+            );
+          })
+        )}
+        {visible.length > 200 && (
+          <div className="px-3 py-2 text-center text-[11px] text-muted-foreground italic">
+            Showing first 200 of {visible.length}. Type to narrow.
+          </div>
+        )}
+      </div>
     </div>
   );
 }

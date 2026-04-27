@@ -566,6 +566,44 @@ export class DatabaseStorage implements IStorage {
       .get();
     return Number(r?.c ?? 0);
   }
+  // Returns sorted, deduped, non-empty values for a column on mls_listings.
+  // Whitelisted to a fixed set of safe column names — see /api/public/mls/distinct.
+  distinctMlsValues(field: "subdivision" | "district" | "city" | "neighbourhood" | "structureType" | "architecturalStyle"): string[] {
+    const colMap: Record<string, string> = {
+      subdivision: "subdivision",
+      district: "district",
+      city: "city",
+      neighbourhood: "neighbourhood",
+      structureType: "structure_type",
+      architecturalStyle: "architectural_style",
+    };
+    const col = colMap[field];
+    if (!col) return [];
+    const rows = sqlite
+      .prepare(
+        `SELECT DISTINCT ${col} AS value FROM mls_listings WHERE ${col} IS NOT NULL AND TRIM(${col}) != '' ORDER BY ${col} ASC`,
+      )
+      .all() as Array<{ value: string }>;
+    // Some Pillar 9 fields are comma-separated lists (e.g. "Cul-De-Sac, Treed").
+    // Split + dedupe so the dropdown shows individual values, not concatenations.
+    const set = new Set<string>();
+    for (const r of rows) {
+      const v = r.value;
+      if (!v) continue;
+      // Only split fields known to be multi-value lists. Subdivision, district,
+      // city and neighbourhood are atomic so we keep them whole.
+      if (field === "structureType" || field === "architecturalStyle") {
+        for (const part of v.split(/\s*,\s*/)) {
+          const t = part.trim();
+          if (t) set.add(t);
+        }
+      } else {
+        set.add(v.trim());
+      }
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }
+
   searchMlsListings(opts: {
     q?: string;
     minPrice?: number;

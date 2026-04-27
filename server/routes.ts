@@ -388,6 +388,20 @@ export async function registerRoutes(
   });
 
   // ---------- PUBLIC MLS / MARKETING API ----------
+  // GET /api/public/mls/distinct?field=subdivision|district|city|neighbourhood
+  // Returns sorted unique non-empty values currently in the database. Used
+  // by the public search to render dynamic checkbox lists for high-cardinality
+  // free-text columns (Pillar 9 has hundreds of subdivisions across Alberta).
+  app.get("/api/public/mls/distinct", (req, res) => {
+    const field = String(req.query.field ?? "");
+    const allowed = new Set(["subdivision", "district", "city", "neighbourhood", "structureType", "architecturalStyle"]);
+    if (!allowed.has(field)) {
+      return res.status(400).json({ message: "Field not allowed" });
+    }
+    const values = storage.distinctMlsValues(field as any);
+    res.json({ field, values });
+  });
+
   // GET /api/public/mls/search — paginated, filterable MLS search
   app.get("/api/public/mls/search", (req, res) => {
     const q = req.query;
