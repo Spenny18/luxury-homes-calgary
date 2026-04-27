@@ -394,6 +394,14 @@ export async function registerRoutes(
     const num = (v: any) => (v != null && v !== "" ? Number(v) : undefined);
     const str = (v: any) => (typeof v === "string" && v.length ? v : undefined);
     const bool = (v: any) => v === "true" || v === "1";
+    // Multi-value list — accept either repeated `key=a&key=b` or comma-separated.
+    const list = (v: any): string[] | undefined => {
+      let arr: string[] = [];
+      if (Array.isArray(v)) arr = v.filter((x) => typeof x === "string") as string[];
+      else if (typeof v === "string") arr = v.split(",");
+      arr = arr.map((s) => s.trim()).filter(Boolean);
+      return arr.length ? arr : undefined;
+    };
     const result = storage.searchMlsListings({
       q: str(q.q),
       minPrice: num(q.minPrice),
@@ -401,10 +409,11 @@ export async function registerRoutes(
       beds: num(q.beds),
       baths: num(q.baths),
       propertyType: str(q.propertyType),
-      propertySubType: str(q.propertySubType),
+      propertySubTypes: list(q.propertySubTypes ?? q.propertySubType),
+      cities: list(q.cities ?? q.city),
       neighbourhood: str(q.neighbourhood),
       postalCode: str(q.postalCode),
-      status: str(q.status) ?? "Active",
+      statuses: list(q.statuses ?? q.status) ?? ["Active"],
       minSqft: num(q.minSqft),
       maxSqft: num(q.maxSqft),
       yearMin: num(q.yearMin),
@@ -412,7 +421,28 @@ export async function registerRoutes(
       garageMin: num(q.garageMin),
       domMax: num(q.domMax),
       hasPhotos: bool(q.hasPhotos),
+      // Boolean toggles
+      garageYn: q.garageYn != null ? bool(q.garageYn) : undefined,
+      poolYn: q.poolYn != null ? bool(q.poolYn) : undefined,
+      waterfrontYn: q.waterfrontYn != null ? bool(q.waterfrontYn) : undefined,
+      airConditioned: q.airConditioned != null ? bool(q.airConditioned) : undefined,
+      // Multi-value structured filters — match if ANY value appears in the
+      // listing's RETS string (so basement=Walkout&basement=Finished returns
+      // listings that have either Walkout or Finished in their basement field).
+      basements: list(q.basements ?? q.basement),
+      basementDevelopments: list(q.basementDevelopments),
+      parkingFeatures: list(q.parkingFeatures),
+      lotFeatures: list(q.lotFeatures),
+      laundryFeatures: list(q.laundryFeatures),
+      appliances: list(q.appliances),
+      levels: list(q.levels),
+      structureTypes: list(q.structureTypes),
+      architecturalStyles: list(q.architecturalStyles),
+      accessibilityFeatures: list(q.accessibilityFeatures),
+      associationAmenities: list(q.associationAmenities),
+      views: list(q.views),
       keywords: str(q.keywords),
+      condoFeeMax: num(q.condoFeeMax),
       sort: q.sort as any,
       limit: num(q.limit) ?? 24,
       offset: num(q.offset) ?? 0,

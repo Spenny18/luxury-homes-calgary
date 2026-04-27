@@ -273,16 +273,52 @@ sqlite.exec(`
 `);
 
 // --- Lightweight migrations (additive only) ---
-// Add `listing_key` column to mls_listings if missing. SQLite ALTER TABLE ADD
-// COLUMN is idempotent only if we check first — the easiest way is PRAGMA.
+// Add new columns to mls_listings if missing. SQLite ALTER TABLE ADD COLUMN is
+// idempotent only if we check first — easiest path is PRAGMA table_info.
 try {
   const cols = sqlite.prepare("PRAGMA table_info(mls_listings)").all() as Array<{ name: string }>;
-  if (cols.length > 0 && !cols.some((c) => c.name === "listing_key")) {
-    sqlite.exec("ALTER TABLE mls_listings ADD COLUMN listing_key INTEGER");
-    console.log("[migration] added listing_key to mls_listings");
+  if (cols.length > 0) {
+    const existing = new Set(cols.map((c) => c.name));
+    const additions: Array<[string, string]> = [
+      ["listing_key", "INTEGER"],
+      ["structure_type", "TEXT"],
+      ["architectural_style", "TEXT"],
+      ["levels", "TEXT"],
+      ["basement", "TEXT"],
+      ["basement_development", "TEXT"],
+      ["parking_features", "TEXT"],
+      ["garage_yn", "INTEGER"],
+      ["lot_features", "TEXT"],
+      ["laundry_features", "TEXT"],
+      ["appliances", "TEXT"],
+      ["cooling", "TEXT"],
+      ["heating", "TEXT"],
+      ["flooring", "TEXT"],
+      ["fireplaces_total", "INTEGER"],
+      ["fireplace_features", "TEXT"],
+      ["pool_private_yn", "INTEGER"],
+      ["pool_features", "TEXT"],
+      ["waterfront_yn", "INTEGER"],
+      ["view", "TEXT"],
+      ["subdivision", "TEXT"],
+      ["district", "TEXT"],
+      ["condo_fee", "INTEGER"],
+      ["association_fee_includes", "TEXT"],
+      ["association_amenities", "TEXT"],
+      ["accessibility_features", "TEXT"],
+      ["inclusions", "TEXT"],
+      ["exclusions", "TEXT"],
+      ["zoning", "TEXT"],
+    ];
+    for (const [name, type] of additions) {
+      if (!existing.has(name)) {
+        sqlite.exec(`ALTER TABLE mls_listings ADD COLUMN ${name} ${type}`);
+        console.log(`[migration] added ${name} to mls_listings`);
+      }
+    }
   }
 } catch (err) {
-  console.error("[migration] failed to add listing_key column:", err);
+  console.error("[migration] failed to add mls_listings columns:", err);
 }
 
 export const db = drizzle(sqlite);
@@ -534,10 +570,11 @@ export class DatabaseStorage implements IStorage {
     beds?: number; // minimum
     baths?: number; // minimum
     propertyType?: string;
-    propertySubType?: string;
+    propertySubTypes?: string[];
+    cities?: string[];
     neighbourhood?: string;
     postalCode?: string;
-    status?: string;
+    statuses?: string[];
     minSqft?: number;
     maxSqft?: number;
     yearMin?: number;
@@ -545,7 +582,24 @@ export class DatabaseStorage implements IStorage {
     garageMin?: number;
     domMax?: number;
     hasPhotos?: boolean;
+    garageYn?: boolean;
+    poolYn?: boolean;
+    waterfrontYn?: boolean;
+    airConditioned?: boolean;
+    basements?: string[];
+    basementDevelopments?: string[];
+    parkingFeatures?: string[];
+    lotFeatures?: string[];
+    laundryFeatures?: string[];
+    appliances?: string[];
+    levels?: string[];
+    structureTypes?: string[];
+    architecturalStyles?: string[];
+    accessibilityFeatures?: string[];
+    associationAmenities?: string[];
+    views?: string[];
     keywords?: string; // comma-separated; ALL must appear in description
+    condoFeeMax?: number;
     sort?: "price-asc" | "price-desc" | "newest" | "sqft-desc";
     limit?: number;
     offset?: number;
@@ -556,10 +610,17 @@ export class DatabaseStorage implements IStorage {
     if (opts.beds) where.push(gte(mlsListings.beds, opts.beds));
     if (opts.baths) where.push(gte(mlsListings.baths, opts.baths));
     if (opts.propertyType && opts.propertyType !== "Any") where.push(eq(mlsListings.propertyType, opts.propertyType));
-    if (opts.propertySubType && opts.propertySubType !== "Any") where.push(eq(mlsListings.propertySubType, opts.propertySubType));
+    if (opts.propertySubTypes?.length) {
+      where.push(or(...opts.propertySubTypes.map((s) => eq(mlsListings.propertySubType, s)))!);
+    }
+    if (opts.cities?.length) {
+      where.push(or(...opts.cities.map((c) => eq(mlsListings.city, c)))!);
+    }
     if (opts.neighbourhood) where.push(eq(mlsListings.neighbourhood, opts.neighbourhood));
     if (opts.postalCode) where.push(like(mlsListings.postalCode, `${opts.postalCode.toUpperCase()}%`));
-    if (opts.status) where.push(eq(mlsListings.status, opts.status));
+    if (opts.statuses?.length) {
+      where.push(or(...opts.statuses.map((s) => eq(mlsListings.status, s)))!);
+    }
     if (opts.minSqft) where.push(gte(mlsListings.sqft, opts.minSqft));
     if (opts.maxSqft) where.push(lte(mlsListings.sqft, opts.maxSqft));
     if (opts.yearMin) where.push(gte(mlsListings.yearBuilt, opts.yearMin));
@@ -567,6 +628,46 @@ export class DatabaseStorage implements IStorage {
     if (opts.garageMin) where.push(gte(mlsListings.garageSpaces, opts.garageMin));
     if (opts.domMax != null) where.push(lte(mlsListings.daysOnMarket, opts.domMax));
     if (opts.hasPhotos) where.push(gte(mlsListings.photoCount, 1));
+    if (opts.condoFeeMax != null) where.push(lte(mlsListings.condoFee, opts.condoFeeMax));
+    if (opts.garageYn != null) where.push(eq(mlsListings.garageYn, opts.garageYn));
+    if (opts.poolYn != null) where.push(eq(mlsListings.poolPrivateYn, opts.poolYn));
+    if (opts.waterfrontYn != null) where.push(eq(mlsListings.waterfrontYn, opts.waterfrontYn));
+    if (opts.airConditioned != null) {
+      // Cooling field is a multi-value string like "Central Air, Wall Unit"
+      // — anything containing the word "Air" or "Conditioner" counts.
+      if (opts.airConditioned) {
+        where.push(
+          or(
+            like(mlsListings.cooling, "%Air%"),
+            like(mlsListings.cooling, "%Cool%"),
+            like(mlsListings.cooling, "%Conditioner%"),
+          )!,
+        );
+      }
+    }
+    // For each multi-value list filter, listing matches if ANY of the
+    // selected values appears in its RETS string (substring match).
+    const matchesAny = (col: any, vals?: string[]) => {
+      if (!vals?.length) return null;
+      return or(...vals.map((v) => like(col, `%${v}%`)))!;
+    };
+    const orFilters = [
+      matchesAny(mlsListings.basement, opts.basements),
+      matchesAny(mlsListings.basementDevelopment, opts.basementDevelopments),
+      matchesAny(mlsListings.parkingFeatures, opts.parkingFeatures),
+      matchesAny(mlsListings.lotFeatures, opts.lotFeatures),
+      matchesAny(mlsListings.laundryFeatures, opts.laundryFeatures),
+      matchesAny(mlsListings.appliances, opts.appliances),
+      matchesAny(mlsListings.levels, opts.levels),
+      matchesAny(mlsListings.structureType, opts.structureTypes),
+      matchesAny(mlsListings.architecturalStyle, opts.architecturalStyles),
+      matchesAny(mlsListings.accessibilityFeatures, opts.accessibilityFeatures),
+      matchesAny(mlsListings.associationAmenities, opts.associationAmenities),
+      matchesAny(mlsListings.view, opts.views),
+    ];
+    for (const f of orFilters) {
+      if (f) where.push(f);
+    }
     if (opts.q) {
       const q = `%${opts.q}%`;
       where.push(
@@ -579,9 +680,6 @@ export class DatabaseStorage implements IStorage {
       );
     }
     if (opts.keywords) {
-      // Split on commas, trim, drop empties. ALL keywords must appear in
-      // description (case-insensitive) — gives buyers a way to find specific
-      // features like "double garage, walkout basement, ensuite laundry".
       const terms = opts.keywords
         .split(",")
         .map((t) => t.trim())

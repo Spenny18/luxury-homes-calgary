@@ -100,7 +100,36 @@ function normalizeListing(row: Record<string, string>): InsertMlsListing | null 
     rawJson: null,
     syncedAt: new Date().toISOString(),
     createdAt: new Date().toISOString(),
-  };
+    // ---- structured fields ----
+    structureType: rawText(row.StructureType) ?? undefined,
+    architecturalStyle: rawText(row.ArchitecturalStyle) ?? undefined,
+    levels: rawText(row.Levels) ?? undefined,
+    basement: rawText(row.Basement) ?? undefined,
+    basementDevelopment: rawText(row.BasementDevelopment) ?? undefined,
+    parkingFeatures: rawText(row.ParkingFeatures) ?? undefined,
+    garageYn: rawBool(row.GarageYN) ?? undefined,
+    lotFeatures: rawText(row.LotFeatures) ?? undefined,
+    laundryFeatures: rawText(row.LaundryFeatures) ?? undefined,
+    appliances: rawText(row.Appliances) ?? undefined,
+    cooling: rawText(row.Cooling) ?? undefined,
+    heating: rawText(row.Heating) ?? undefined,
+    flooring: rawText(row.Flooring) ?? undefined,
+    fireplacesTotal: rawInt(row.FireplacesTotal) ?? undefined,
+    fireplaceFeatures: rawText(row.FireplaceFeatures) ?? undefined,
+    poolPrivateYn: rawBool(row.PoolPrivateYN) ?? undefined,
+    poolFeatures: rawText(row.PoolFeatures) ?? undefined,
+    waterfrontYn: rawBool(row.WaterfrontYN) ?? undefined,
+    view: rawText(row.View) ?? undefined,
+    subdivision: rawText(row.SubdivisionName) ?? undefined,
+    district: rawText(row.District) ?? undefined,
+    condoFee: rawInt(row.AssociationFee) ?? undefined,
+    associationFeeIncludes: rawText(row.AssociationFeeIncludes) ?? undefined,
+    associationAmenities: rawText(row.AssociationAmenities) ?? undefined,
+    accessibilityFeatures: rawText(row.AccessibilityFeatures) ?? undefined,
+    inclusions: rawText(row.Inclusions) ?? undefined,
+    exclusions: rawText(row.Exclusions) ?? undefined,
+    zoning: rawText(row.Zoning) ?? undefined,
+  } as any;
 }
 
 const SELECT_FIELDS = [
@@ -123,11 +152,61 @@ const SELECT_FIELDS = [
   "PublicRemarks",
   "ModificationTimestamp",
   "YearBuilt",
-  // Note: SubArea / CommunityFeatures are board-specific in Pillar 9. We pull
-  // them via a second pass once metadata confirms field names. For now we
-  // infer neighbourhood from UnparsedAddress + PublicRemarks which works on
-  // a 2-step fallback in inferNeighbourhood().
+  // ---- structured fields used by filters ----
+  "StructureType",
+  "ArchitecturalStyle",
+  "Levels",
+  "Basement",
+  "BasementDevelopment",
+  "ParkingFeatures",
+  "GarageYN",
+  "GarageSpaces",
+  "LotFeatures",
+  "LaundryFeatures",
+  "Appliances",
+  "Cooling",
+  "Heating",
+  "Flooring",
+  "FireplacesTotal",
+  "FireplaceFeatures",
+  "PoolPrivateYN",
+  "PoolFeatures",
+  "WaterfrontYN",
+  "View",
+  "SubdivisionName",
+  "District",
+  "AssociationFee",
+  "AssociationFeeIncludes",
+  "AssociationAmenities",
+  "AccessibilityFeatures",
+  "Inclusions",
+  "Exclusions",
+  "Zoning",
+  "DaysOnMarket",
+  "ListDate",
+  "LotSizeAcres",
+  "LotSizeSquareFeet",
 ].join(",");
+
+function rawText(v: any): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s.length ? s : null;
+}
+
+function rawBool(v: any): boolean | null {
+  if (v == null) return null;
+  const s = String(v).trim().toUpperCase();
+  if (s === "Y" || s === "YES" || s === "TRUE" || s === "1") return true;
+  if (s === "N" || s === "NO" || s === "FALSE" || s === "0") return false;
+  return null;
+}
+
+function rawInt(v: any): number | null {
+  if (v == null || v === "") return null;
+  const n = parseInt(String(v), 10);
+  return Number.isFinite(n) ? n : null;
+}
 
 export async function runSync(): Promise<{
   status: "success" | "error" | "skipped";
@@ -159,8 +238,16 @@ export async function runSync(): Promise<{
   try {
     await client.login();
 
-    // Calgary postal codes start with T1Y, T2, or T3. Iterate the prefixes.
-    const prefixes = ["T2*", "T3*", "T1Y*"];
+    // Iterate every postal-code prefix Pillar 9 serves so we cover Calgary +
+    // surrounding municipalities (Rocky View, Foothills, Airdrie, Cochrane,
+    // Okotoks, Strathmore, etc.) Pillar 9's service area is roughly all
+    // Alberta postal codes starting with T0, T1, T2, T3, T4. Loop them all.
+    const prefixes = [
+      "T0A*", "T0B*", "T0C*", "T0E*", "T0G*", "T0H*", "T0J*", "T0K*", "T0L*", "T0M*", "T0P*", "T0V*",
+      "T1A*", "T1B*", "T1C*", "T1G*", "T1H*", "T1J*", "T1K*", "T1L*", "T1M*", "T1P*", "T1R*", "T1S*", "T1V*", "T1W*", "T1X*", "T1Y*", "T1Z*",
+      "T2*", "T3*",
+      "T4A*", "T4B*", "T4C*", "T4E*", "T4G*", "T4H*", "T4J*", "T4L*", "T4M*", "T4N*", "T4P*", "T4R*", "T4S*", "T4T*", "T4V*", "T4X*",
+    ];
     for (const prefix of prefixes) {
       let offset = 0;
       const pageSize = 200;
@@ -176,9 +263,8 @@ export async function runSync(): Promise<{
         if (result.rows.length === 0) break;
         fetched += result.rows.length;
         for (const row of result.rows) {
-          // Post-filter: must be in Calgary (since City field isn't searchable)
-          const city = row.City?.trim();
-          if (city && city.toLowerCase() !== "calgary") continue;
+          // No city post-filter — we want the whole Pillar 9 service area
+          // (Calgary + Rocky View + Foothills + Cochrane + Airdrie + …).
           const listing = normalizeListing(row);
           if (!listing) continue;
           storage.upsertMlsListing(listing);
@@ -187,8 +273,9 @@ export async function runSync(): Promise<{
         }
         if (result.rows.length < pageSize) break;
         offset += pageSize;
-        // Safety cap
-        if (offset > 5000) break;
+        // Safety cap per prefix — generous so we can cover dense urban prefixes
+        // (T2/T3 cover most of Calgary and routinely have 3-4k active listings each).
+        if (offset > 10000) break;
       }
     }
 
