@@ -332,6 +332,18 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/tours/:id", requireAuth, (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid id" });
+    const status = (req.body ?? {}).status;
+    if (!status || typeof status !== "string") {
+      return res.status(400).json({ message: "Status required" });
+    }
+    const updated = storage.updateTourStatus(id, status);
+    if (!updated) return res.status(404).json({ message: "Tour not found" });
+    res.json(updated);
+  });
+
   // ---------- PUBLIC INQUIRY ----------
   // Creates a lead row + sends Spencer an email via Gmail (gcal connector).
   app.post("/api/inquiry", inquiryLimiter, async (req, res) => {

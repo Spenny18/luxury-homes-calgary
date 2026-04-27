@@ -13,6 +13,10 @@ import {
   LogOut,
   Database,
   Globe,
+  Calendar,
+  Megaphone,
+  BarChart3,
+  Bookmark,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -30,6 +34,10 @@ const primaryNav: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/admin/dashboard" },
   { label: "Listings", icon: Home, href: "/admin/listings" },
   { label: "Leads", icon: Users, href: "/admin/leads" },
+  { label: "Calendar", icon: Calendar, href: "/admin/calendar" },
+  { label: "Marketing", icon: Megaphone, href: "/admin/marketing" },
+  { label: "Analytics", icon: BarChart3, href: "/admin/analytics" },
+  { label: "Saved Searches", icon: Bookmark, href: "/admin/saved-searches" },
   { label: "MLS Sync", icon: Database, href: "/admin/mls-sync" },
 ];
 

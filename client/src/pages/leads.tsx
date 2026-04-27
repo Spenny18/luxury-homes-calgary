@@ -342,6 +342,23 @@ export default function LeadsPage() {
                       <CalendarPlus className="w-3.5 h-3.5 mr-1.5" /> BOOK TOUR
                     </Button>
                     <Button
+                      asChild
+                      variant="outline"
+                      size="sm"
+                      className="h-11 rounded-sm font-display tracking-[0.14em] text-[11px]"
+                      title="Open in your email client"
+                    >
+                      <a
+                        href={`mailto:${selected.email}?subject=${encodeURIComponent(
+                          `Re: ${selectedListing?.title ?? "your enquiry"}`,
+                        )}&body=${encodeURIComponent(
+                          `Hi ${selected.name.split(" ")[0]},\n\n${reply || ""}\n\nChat soon, cheers!\nSpencer Rivers\nREALTOR® | Rivers Real Estate\n(403) 966-9237`,
+                        )}`}
+                      >
+                        <Mail className="w-3.5 h-3.5 mr-1.5" /> EMAIL
+                      </a>
+                    </Button>
+                    <Button
                       size="sm"
                       className="h-11 rounded-sm font-display tracking-[0.14em] text-[11px]"
                       disabled={!reply.trim() || sendReply.isPending}
