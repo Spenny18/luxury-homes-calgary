@@ -292,6 +292,16 @@ export const neighbourhoods = sqliteTable("neighbourhoods", {
   outsideCopy: text("outside_copy").notNull().default("[]"),
   amenitiesCopy: text("amenities_copy").notNull().default("[]"),
   shopDineCopy: text("shop_dine_copy").notNull().default("[]"),
+  // Real-estate intro paragraphs (JSON array of strings)
+  realEstateCopy: text("real_estate_copy").notNull().default("[]"),
+  // Lifestyle / family copy (JSON array of strings)
+  lifeCopy: text("life_copy").notNull().default("[]"),
+  // Quadrant: city-centre | west | south | southeast | north | northwest | northeast | east | surrounding
+  quadrant: text("quadrant").notNull().default("city-centre"),
+  // Border streets {north, south, east, west}
+  borders: text("borders").notNull().default("{}"),
+  // Schools list — JSON array of {name, level, area, url}
+  schools: text("schools").notNull().default("[]"),
   heroImage: text("hero_image").notNull(),
   gallery: text("gallery").notNull().default("[]"),
   centerLat: real("center_lat").notNull(),
@@ -301,6 +311,42 @@ export const neighbourhoods = sqliteTable("neighbourhoods", {
   // Sort order in lists
   sortOrder: integer("sort_order").notNull().default(0),
 });
+
+// ---- Condo Buildings ------------------------------------------------------
+export const condoBuildings = sqliteTable("condo_buildings", {
+  slug: text("slug").primaryKey(),
+  name: text("name").notNull(),
+  tagline: text("tagline").notNull(),
+  // Editorial paragraphs (JSON arrays)
+  intro: text("intro").notNull().default("[]"),
+  residencesCopy: text("residences_copy").notNull().default("[]"),
+  architecturalCopy: text("architectural_copy").notNull().default("[]"),
+  // Amenities list — JSON array of strings
+  amenities: text("amenities").notNull().default("[]"),
+  // Address fields
+  address: text("address").notNull(),
+  // Neighbourhood + quadrant for cross-linking + listing filtering
+  neighbourhoodSlug: text("neighbourhood_slug").notNull(),
+  neighbourhood: text("neighbourhood").notNull(),
+  quadrant: text("quadrant").notNull().default("city-centre"),
+  // Building stats
+  units: integer("units"),
+  stories: integer("stories"),
+  builtIn: integer("built_in"),
+  developer: text("developer"),
+  architect: text("architect"),
+  // Lat/lng
+  lat: real("lat").notNull(),
+  lng: real("lng").notNull(),
+  heroImage: text("hero_image").notNull(),
+  gallery: text("gallery").notNull().default("[]"),
+  // Sort + display
+  sortOrder: integer("sort_order").notNull().default(0),
+  featured: integer("featured", { mode: "boolean" }).notNull().default(false),
+});
+
+export type CondoBuilding = typeof condoBuildings.$inferSelect;
+export type InsertCondoBuilding = typeof condoBuildings.$inferInsert;
 
 export type Neighbourhood = typeof neighbourhoods.$inferSelect;
 export type InsertNeighbourhood = typeof neighbourhoods.$inferInsert;

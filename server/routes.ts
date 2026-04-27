@@ -13,6 +13,16 @@ import { fetchListingPhoto } from "./rets-photos";
 
 const execFileAsync = promisify(execFile);
 
+function parseJsonArr(s: string | null | undefined): any[] {
+  if (!s) return [];
+  try {
+    const v = JSON.parse(s);
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
 declare module "express-session" {
   interface SessionData {
     userId?: number;
@@ -520,7 +530,65 @@ export async function registerRoutes(
 
   // GET /api/public/neighbourhoods (list)
   app.get("/api/public/neighbourhoods", (_req, res) => {
-    res.json(storage.listNeighbourhoods());
+    const items = storage.listNeighbourhoods().map((n) => ({
+      ...n,
+      story: parseJsonArr(n.story),
+      outsideCopy: parseJsonArr(n.outsideCopy),
+      amenitiesCopy: parseJsonArr(n.amenitiesCopy),
+      shopDineCopy: parseJsonArr(n.shopDineCopy),
+      realEstateCopy: parseJsonArr(n.realEstateCopy),
+      lifeCopy: parseJsonArr(n.lifeCopy),
+      schools: parseJsonArr(n.schools),
+      gallery: parseJsonArr(n.gallery),
+      borders: (() => { try { return JSON.parse(n.borders); } catch { return {}; } })(),
+    }));
+    res.json(items);
+  });
+
+  // GET /api/public/condos (list)
+  app.get("/api/public/condos", (_req, res) => {
+    const items = storage.listCondoBuildings().map((c) => ({
+      ...c,
+      intro: parseJsonArr(c.intro),
+      residencesCopy: parseJsonArr(c.residencesCopy),
+      architecturalCopy: parseJsonArr(c.architecturalCopy),
+      amenities: parseJsonArr(c.amenities),
+      gallery: parseJsonArr(c.gallery),
+    }));
+    res.json(items);
+  });
+
+  // GET /api/public/condos/:slug
+  app.get("/api/public/condos/:slug", (req, res) => {
+    const c = storage.getCondoBuildingBySlug(req.params.slug);
+    if (!c) return res.status(404).json({ message: "Condo building not found" });
+    // Active listings AT this building's address (number + street prefix match)
+    // helps surface unit listings without exact-match precision.
+    const addressKey = c.address.split(",")[0].trim();
+    const listings = storage.listingsAtAddress(addressKey, 30).map((l) => ({
+      id: l.id,
+      mlsNumber: l.mlsNumber,
+      fullAddress: l.fullAddress,
+      listPrice: l.listPrice,
+      beds: l.beds,
+      baths: l.baths,
+      sqft: l.sqft,
+      photoCount: l.photoCount,
+      heroImage: l.heroImage,
+      status: l.status,
+      neighbourhood: l.neighbourhood,
+      lat: l.lat,
+      lng: l.lng,
+    }));
+    res.json({
+      ...c,
+      intro: parseJsonArr(c.intro),
+      residencesCopy: parseJsonArr(c.residencesCopy),
+      architecturalCopy: parseJsonArr(c.architecturalCopy),
+      amenities: parseJsonArr(c.amenities),
+      gallery: parseJsonArr(c.gallery),
+      listings,
+    });
   });
 
   // GET /api/public/neighbourhoods/:slug
@@ -528,7 +596,19 @@ export async function registerRoutes(
     const n = storage.getNeighbourhoodBySlug(req.params.slug);
     if (!n) return res.status(404).json({ message: "Neighbourhood not found" });
     const listings = storage.listMlsByNeighbourhood(n.name, 24);
-    res.json({ ...n, listings });
+    res.json({
+      ...n,
+      story: parseJsonArr(n.story),
+      outsideCopy: parseJsonArr(n.outsideCopy),
+      amenitiesCopy: parseJsonArr(n.amenitiesCopy),
+      shopDineCopy: parseJsonArr(n.shopDineCopy),
+      realEstateCopy: parseJsonArr(n.realEstateCopy),
+      lifeCopy: parseJsonArr(n.lifeCopy),
+      schools: parseJsonArr(n.schools),
+      gallery: parseJsonArr(n.gallery),
+      borders: (() => { try { return JSON.parse(n.borders); } catch { return {}; } })(),
+      listings,
+    });
   });
 
   // GET /api/public/blog

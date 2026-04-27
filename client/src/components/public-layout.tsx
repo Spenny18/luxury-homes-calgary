@@ -14,6 +14,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { label: "MLS Search", href: "/mls" },
   { label: "Neighbourhoods", href: "/neighbourhoods" },
+  { label: "Condos", href: "/condos" },
   { label: "About", href: "/about" },
   { label: "Journal", href: "/blog" },
   { label: "Contact", href: "/contact" },

@@ -101,8 +101,11 @@ export interface MlsSearchResult {
   total: number;
 }
 
-// Helper for parsing JSON-encoded array fields on neighbourhoods
-export function parseJsonArray(s: string | null | undefined): string[] {
+// Helper for parsing JSON-encoded array fields on neighbourhoods.
+// Accepts either a JSON string (legacy) or an already-parsed array (current
+// API response shape) — pass-through if it's already an array.
+export function parseJsonArray(s: any): any[] {
+  if (Array.isArray(s)) return s;
   if (!s) return [];
   try {
     const v = JSON.parse(s);

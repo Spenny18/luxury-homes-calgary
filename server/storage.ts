@@ -12,6 +12,7 @@ import {
   poisCache,
   savedSearches,
   socialPosts,
+  condoBuildings,
 } from "@shared/schema";
 import type {
   User,
@@ -38,6 +39,8 @@ import type {
   InsertSavedSearch,
   SocialPost,
   InsertSocialPost,
+  CondoBuilding,
+  InsertCondoBuilding,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
@@ -240,6 +243,30 @@ sqlite.exec(`
     body TEXT NOT NULL,
     sort_order INTEGER NOT NULL DEFAULT 0
   );
+  CREATE TABLE IF NOT EXISTS condo_buildings (
+    slug TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    tagline TEXT NOT NULL,
+    intro TEXT NOT NULL DEFAULT '[]',
+    residences_copy TEXT NOT NULL DEFAULT '[]',
+    architectural_copy TEXT NOT NULL DEFAULT '[]',
+    amenities TEXT NOT NULL DEFAULT '[]',
+    address TEXT NOT NULL,
+    neighbourhood_slug TEXT NOT NULL,
+    neighbourhood TEXT NOT NULL,
+    quadrant TEXT NOT NULL DEFAULT 'city-centre',
+    units INTEGER,
+    stories INTEGER,
+    built_in INTEGER,
+    developer TEXT,
+    architect TEXT,
+    lat REAL NOT NULL,
+    lng REAL NOT NULL,
+    hero_image TEXT NOT NULL,
+    gallery TEXT NOT NULL DEFAULT '[]',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    featured INTEGER NOT NULL DEFAULT 0
+  );
   CREATE TABLE IF NOT EXISTS pois_cache (
     id TEXT PRIMARY KEY,
     lat REAL NOT NULL,
@@ -322,6 +349,29 @@ try {
   }
 } catch (err) {
   console.error("[migration] failed to add mls_listings columns:", err);
+}
+
+// Neighbourhoods table additions (idempotent).
+try {
+  const cols = sqlite.prepare("PRAGMA table_info(neighbourhoods)").all() as Array<{ name: string }>;
+  if (cols.length > 0) {
+    const existing = new Set(cols.map((c) => c.name));
+    const additions: Array<[string, string]> = [
+      ["real_estate_copy", "TEXT NOT NULL DEFAULT '[]'"],
+      ["life_copy", "TEXT NOT NULL DEFAULT '[]'"],
+      ["quadrant", "TEXT NOT NULL DEFAULT 'city-centre'"],
+      ["borders", "TEXT NOT NULL DEFAULT '{}'"],
+      ["schools", "TEXT NOT NULL DEFAULT '[]'"],
+    ];
+    for (const [name, type] of additions) {
+      if (!existing.has(name)) {
+        sqlite.exec(`ALTER TABLE neighbourhoods ADD COLUMN ${name} ${type}`);
+        console.log(`[migration] added ${name} to neighbourhoods`);
+      }
+    }
+  }
+} catch (err) {
+  console.error("[migration] failed to add neighbourhoods columns:", err);
 }
 
 export const db = drizzle(sqlite);
@@ -957,6 +1007,36 @@ export class DatabaseStorage implements IStorage {
         .get();
       db.update(neighbourhoods).set({ activeCount: Number(c?.c ?? 0) }).where(eq(neighbourhoods.slug, n.slug)).run();
     }
+  }
+  // ---- Condo Buildings ---------------------------------------------------
+  listCondoBuildings(): CondoBuilding[] {
+    return db.select().from(condoBuildings).orderBy(asc(condoBuildings.sortOrder)).all();
+  }
+  getCondoBuildingBySlug(slug: string): CondoBuilding | undefined {
+    return db.select().from(condoBuildings).where(eq(condoBuildings.slug, slug)).get();
+  }
+  upsertCondoBuilding(data: InsertCondoBuilding): CondoBuilding {
+    const existing = db.select().from(condoBuildings).where(eq(condoBuildings.slug, data.slug!)).get();
+    if (existing) {
+      return db.update(condoBuildings).set(data).where(eq(condoBuildings.slug, data.slug!)).returning().get();
+    }
+    return db.insert(condoBuildings).values(data).returning().get();
+  }
+  // Active MLS listings at a specific street address — used by condo detail
+  // pages to show units currently for sale in the building.
+  listingsAtAddress(addressMatch: string, limit = 24): MlsListing[] {
+    return db
+      .select()
+      .from(mlsListings)
+      .where(
+        and(
+          eq(mlsListings.status, "Active"),
+          like(mlsListings.fullAddress, `%${addressMatch}%`),
+        )!,
+      )
+      .orderBy(desc(mlsListings.listPrice))
+      .limit(limit)
+      .all();
   }
   // ---- Testimonials -------------------------------------------------------
   listTestimonials(): Testimonial[] {

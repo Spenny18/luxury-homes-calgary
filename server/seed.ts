@@ -12,7 +12,9 @@ import {
   neighbourhoods,
   testimonials,
   mlsListings,
+  condoBuildings,
 } from "@shared/schema";
+import { MARQUEE_NEIGHBOURHOODS, MARQUEE_CONDOS } from "./seed-marquee";
 
 const SEED_LISTINGS = [
   {
@@ -360,14 +362,74 @@ export function seedDatabase() {
     console.log("[seed] Inserted " + SEED_LEADS.length + " leads");
   }
 
-  // 4. Neighbourhoods (editorial content for the 6 luxury markets)
-  const existingHoods = db.select().from(neighbourhoods).all();
-  if (existingHoods.length === 0) {
-    for (const n of SEED_NEIGHBOURHOODS) {
-      db.insert(neighbourhoods).values(n).run();
+  // 4. Neighbourhoods — UPSERT each marquee row so existing 6 get the new
+  // structured fields (quadrant, borders, schools, lifeCopy, realEstateCopy)
+  // and the additional 24 marquee rows get inserted.
+  for (const n of MARQUEE_NEIGHBOURHOODS) {
+    const row = {
+      slug: n.slug,
+      name: n.name,
+      tagline: n.tagline,
+      story: JSON.stringify(n.story),
+      outsideCopy: JSON.stringify(n.outsideCopy),
+      amenitiesCopy: JSON.stringify(n.amenitiesCopy),
+      shopDineCopy: JSON.stringify(n.shopDineCopy),
+      realEstateCopy: JSON.stringify(n.realEstateCopy),
+      lifeCopy: JSON.stringify(n.lifeCopy),
+      quadrant: n.quadrant,
+      borders: JSON.stringify(n.borders),
+      schools: JSON.stringify(n.schools),
+      heroImage: n.heroImage,
+      gallery: JSON.stringify([]),
+      centerLat: n.centerLat,
+      centerLng: n.centerLng,
+      avgPrice: n.avgPrice,
+      activeCount: 0,
+      sortOrder: n.sortOrder,
+    };
+    const existing = db.select().from(neighbourhoods).where(eq(neighbourhoods.slug, n.slug)).get();
+    if (existing) {
+      db.update(neighbourhoods).set(row).where(eq(neighbourhoods.slug, n.slug)).run();
+    } else {
+      db.insert(neighbourhoods).values(row).run();
     }
-    console.log("[seed] Inserted " + SEED_NEIGHBOURHOODS.length + " neighbourhoods");
   }
+  console.log("[seed] Upserted " + MARQUEE_NEIGHBOURHOODS.length + " marquee neighbourhoods");
+
+  // 4b. Condo buildings — same upsert pattern
+  for (const c of MARQUEE_CONDOS) {
+    const row = {
+      slug: c.slug,
+      name: c.name,
+      tagline: c.tagline,
+      intro: JSON.stringify(c.intro),
+      residencesCopy: JSON.stringify(c.residencesCopy),
+      architecturalCopy: JSON.stringify(c.architecturalCopy),
+      amenities: JSON.stringify(c.amenities),
+      address: c.address,
+      neighbourhoodSlug: c.neighbourhoodSlug,
+      neighbourhood: c.neighbourhood,
+      quadrant: c.quadrant,
+      units: c.units ?? null,
+      stories: c.stories ?? null,
+      builtIn: c.builtIn ?? null,
+      developer: c.developer ?? null,
+      architect: c.architect ?? null,
+      lat: c.lat,
+      lng: c.lng,
+      heroImage: c.heroImage,
+      gallery: JSON.stringify([]),
+      sortOrder: c.sortOrder,
+      featured: c.featured,
+    };
+    const existing = db.select().from(condoBuildings).where(eq(condoBuildings.slug, c.slug)).get();
+    if (existing) {
+      db.update(condoBuildings).set(row).where(eq(condoBuildings.slug, c.slug)).run();
+    } else {
+      db.insert(condoBuildings).values(row).run();
+    }
+  }
+  console.log("[seed] Upserted " + MARQUEE_CONDOS.length + " condo buildings");
 
   // 5. Blog posts
   const existingPosts = db.select().from(blogPosts).all();

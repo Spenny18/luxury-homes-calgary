@@ -14,6 +14,8 @@ import MlsSearchPage from "@/pages/mls-search";
 import MlsDetailPage from "@/pages/mls-detail";
 import NeighbourhoodsIndexPage from "@/pages/neighbourhoods-index";
 import NeighbourhoodDetailPage from "@/pages/neighbourhood-detail";
+import CondosIndexPage from "@/pages/condos-index";
+import CondoDetailPage from "@/pages/condo-detail";
 import AboutPage from "@/pages/about";
 import BlogIndexPage from "@/pages/blog-index";
 import BlogDetailPage from "@/pages/blog-detail";
@@ -73,6 +75,8 @@ function AppRouter() {
       <Route path="/mls/:id" component={MlsDetailPage} />
       <Route path="/neighbourhoods" component={NeighbourhoodsIndexPage} />
       <Route path="/neighbourhoods/:slug" component={NeighbourhoodDetailPage} />
+      <Route path="/condos" component={CondosIndexPage} />
+      <Route path="/condos/:slug" component={CondoDetailPage} />
       <Route path="/about" component={AboutPage} />
       <Route path="/blog" component={BlogIndexPage} />
       <Route path="/blog/:slug" component={BlogDetailPage} />
