@@ -598,6 +598,8 @@ export class DatabaseStorage implements IStorage {
     accessibilityFeatures?: string[];
     associationAmenities?: string[];
     views?: string[];
+    subdivisions?: string[];
+    districts?: string[];
     keywords?: string; // comma-separated; ALL must appear in description
     condoFeeMax?: number;
     sort?: "price-asc" | "price-desc" | "newest" | "sqft-desc";
@@ -664,6 +666,8 @@ export class DatabaseStorage implements IStorage {
       matchesAny(mlsListings.accessibilityFeatures, opts.accessibilityFeatures),
       matchesAny(mlsListings.associationAmenities, opts.associationAmenities),
       matchesAny(mlsListings.view, opts.views),
+      matchesAny(mlsListings.subdivision, opts.subdivisions),
+      matchesAny(mlsListings.district, opts.districts),
     ];
     for (const f of orFilters) {
       if (f) where.push(f);

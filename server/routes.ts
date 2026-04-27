@@ -441,6 +441,8 @@ export async function registerRoutes(
       accessibilityFeatures: list(q.accessibilityFeatures),
       associationAmenities: list(q.associationAmenities),
       views: list(q.views),
+      subdivisions: list(q.subdivisions ?? q.subdivision),
+      districts: list(q.districts ?? q.district),
       keywords: str(q.keywords),
       condoFeeMax: num(q.condoFeeMax),
       sort: q.sort as any,

@@ -98,6 +98,8 @@ interface Filters {
   accessibilityFeatures: string;
   associationAmenities: string;
   views: string;
+  subdivisions: string; // free-text csv (substring match)
+  districts: string; // free-text csv
   condoFeeMax: string;
   keywords: string;
   statuses: string; // multi (csv)
@@ -138,6 +140,8 @@ const DEFAULT_FILTERS: Filters = {
   accessibilityFeatures: "",
   associationAmenities: "",
   views: "",
+  subdivisions: "",
+  districts: "",
   condoFeeMax: "",
   keywords: "",
   statuses: "Active",
@@ -359,7 +363,7 @@ function parseQuery(qs: string): Partial<Filters> {
     "basements", "basementDevelopments", "parkingFeatures", "lotFeatures",
     "laundryFeatures", "appliances", "levels", "structureTypes",
     "architecturalStyles", "accessibilityFeatures", "associationAmenities",
-    "views", "condoFeeMax", "keywords", "statuses", "sort",
+    "views", "subdivisions", "districts", "condoFeeMax", "keywords", "statuses", "sort",
   ];
   for (const k of map) {
     const v = params.get(k);
@@ -587,6 +591,8 @@ export default function MlsSearchPage() {
     if (filters.accessibilityFeatures) p.set("accessibilityFeatures", filters.accessibilityFeatures);
     if (filters.associationAmenities) p.set("associationAmenities", filters.associationAmenities);
     if (filters.views) p.set("views", filters.views);
+    if (filters.subdivisions) p.set("subdivisions", filters.subdivisions);
+    if (filters.districts) p.set("districts", filters.districts);
     if (filters.condoFeeMax) p.set("condoFeeMax", filters.condoFeeMax);
     if (filters.keywords) p.set("keywords", filters.keywords);
     if (filters.statuses) p.set("statuses", filters.statuses);
@@ -652,6 +658,8 @@ export default function MlsSearchPage() {
     if (filters.accessibilityFeatures) n++;
     if (filters.associationAmenities) n++;
     if (filters.views) n++;
+    if (filters.subdivisions) n++;
+    if (filters.districts) n++;
     if (filters.condoFeeMax) n++;
     if (filters.keywords) n++;
     if (filters.statuses && filters.statuses !== "Active") n++;
@@ -1233,6 +1241,30 @@ export default function MlsSearchPage() {
                         className="h-11 tabular-nums uppercase"
                         placeholder="e.g. T2T or T3H"
                       />
+                    </FilterRow>
+                    <FilterRow label="Subdivision (comma-separated)">
+                      <Input
+                        value={filters.subdivisions}
+                        onChange={(e) => updateFilter("subdivisions", e.target.value)}
+                        className="h-11"
+                        placeholder="e.g. Aspen Woods, Mahogany, Auburn Bay"
+                      />
+                      <p className="text-[11px] text-muted-foreground mt-1.5 leading-relaxed">
+                        Substring match against the Pillar 9 SubdivisionName field.
+                        Listings matching ANY entry come back. Type partial names to broaden.
+                      </p>
+                    </FilterRow>
+                    <FilterRow label="District (comma-separated)">
+                      <Input
+                        value={filters.districts}
+                        onChange={(e) => updateFilter("districts", e.target.value)}
+                        className="h-11"
+                        placeholder="e.g. CAL Zone NW, City Centre, Foothills"
+                      />
+                      <p className="text-[11px] text-muted-foreground mt-1.5 leading-relaxed">
+                        Pillar 9 District field. Useful for quadrant + rural municipal
+                        boundaries. ANY-match across entries.
+                      </p>
                     </FilterRow>
                   </FilterSection>
 
