@@ -5,6 +5,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "node:http";
 import { startSyncCron } from "./rets-sync";
+import { startLeadAlertCron } from "./lead-alert-cron";
 
 const app = express();
 const httpServer = createServer(app);
@@ -69,6 +70,11 @@ app.use((req, res, next) => {
     startSyncCron();
   } catch (err) {
     console.error("[mls-sync] failed to start cron:", err);
+  }
+  try {
+    startLeadAlertCron();
+  } catch (err) {
+    console.error("[lead-alerts] failed to start cron:", err);
   }
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {

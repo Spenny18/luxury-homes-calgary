@@ -485,6 +485,25 @@ function LeadAlertsAndSnapshot({ leadId }: { leadId: number }) {
       qc.invalidateQueries({ queryKey: ["/api/leads", leadId, "alerts"] }),
   });
 
+  const sendNow = useMutation({
+    mutationFn: async (id: number) => {
+      const r = await apiRequest("POST", `/api/leads/${leadId}/alerts/${id}/send`);
+      return r.json();
+    },
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ["/api/leads", leadId, "alerts"] });
+      const sent = data?.sent ?? 0;
+      const errors = data?.errors ?? 0;
+      if (errors > 0) {
+        alert(`Send had ${errors} error(s). Check fly logs for details.`);
+      } else if (sent > 0) {
+        alert(`Sent ${sent} email${sent === 1 ? "" : "s"}.`);
+      } else {
+        alert("Nothing matched the filter — no email sent.");
+      }
+    },
+  });
+
   return (
     <div className="space-y-5">
       {/* Email alerts list */}
@@ -562,6 +581,16 @@ function LeadAlertsAndSnapshot({ leadId }: { leadId: number }) {
                       }
                     >
                       {a.active ? "ON" : "OFF"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="rounded-sm h-7 px-2 text-[10px]"
+                      title="Send now"
+                      disabled={sendNow.isPending}
+                      onClick={() => sendNow.mutate(a.id)}
+                    >
+                      SEND
                     </Button>
                     <Button
                       variant="ghost"

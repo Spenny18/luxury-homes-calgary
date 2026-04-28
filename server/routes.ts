@@ -377,6 +377,22 @@ export async function registerRoutes(
     res.json({ ok: storage.deleteLeadAlert(alertId) });
   });
 
+  // Manual fire — emails the alert immediately regardless of frequency cadence.
+  // Useful for testing sends or flushing a digest on demand.
+  app.post("/api/leads/:leadId/alerts/:alertId/send", requireAuth, async (req, res) => {
+    const alertId = parseInt(req.params.alertId, 10);
+    if (!Number.isFinite(alertId)) return res.status(400).json({ message: "Invalid id" });
+    const alert = storage.getLeadAlert(alertId);
+    if (!alert) return res.status(404).json({ message: "Alert not found" });
+    // Fire just this one alert by temporarily forcing it through the cycle.
+    // Simpler approach: import and run inline.
+    const { runLeadAlertCycle } = await import("./lead-alert-cron");
+    // Force a re-fire by clearing lastSentAt so the alert appears due.
+    storage.updateLeadAlert(alertId, { lastSentAt: null });
+    const result = await runLeadAlertCycle();
+    res.json(result);
+  });
+
   // ---------- MARKET SNAPSHOT ----------
   // GET /api/admin/market-snapshot?<filters>&daysBack=30
   // Returns counts of new / sold / terminated / price-reduction listings
