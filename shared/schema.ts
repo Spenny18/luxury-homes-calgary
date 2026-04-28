@@ -219,6 +219,14 @@ export const mlsListings = sqliteTable("mls_listings", {
   suite: text("suite"),
   legalSuiteYn: integer("legal_suite_yn", { mode: "boolean" }),
   suiteLocation: text("suite_location"),
+  // Price change tracking (populated by sync when price changes)
+  previousPrice: integer("previous_price"),
+  priceChangedAt: text("price_changed_at"),
+  // Removal tracking — when a listing disappears from the Pillar 9 active feed,
+  // we capture the date it stopped appearing and the prior status if known.
+  // removedReason values: Sold | Expired | Withdrawn | Terminated | Pending | Unknown.
+  removedAt: text("removed_at"),
+  removedReason: text("removed_reason"),
   // ---- /structured fields ----
   // Listing meta
   listDate: text("list_date"),
@@ -347,6 +355,51 @@ export const condoBuildings = sqliteTable("condo_buildings", {
 
 export type CondoBuilding = typeof condoBuildings.$inferSelect;
 export type InsertCondoBuilding = typeof condoBuildings.$inferInsert;
+
+// ---- Lead Alerts ---------------------------------------------------------
+// Each alert ties a lead to a filter set (same JSON shape as savedSearches.filters)
+// and a delivery frequency. The hourly cron picks up due alerts and emails the
+// matched listings to the lead's email + Spencer.
+export const leadAlerts = sqliteTable("lead_alerts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  leadId: integer("lead_id").notNull(),
+  label: text("label").notNull(),
+  filters: text("filters").notNull().default("{}"),
+  // instant | daily | weekly | monthly
+  frequency: text("frequency").notNull().default("daily"),
+  // True only when frequency = "instant" — when true, every new matching
+  // listing fires an immediate email rather than waiting for the cron.
+  instant: integer("instant", { mode: "boolean" }).notNull().default(false),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  lastSentAt: text("last_sent_at"),
+  lastMatchCount: integer("last_match_count").notNull().default(0),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export type LeadAlert = typeof leadAlerts.$inferSelect;
+export type InsertLeadAlert = typeof leadAlerts.$inferInsert;
+
+// ---- MLS Price History --------------------------------------------------
+// Append-only log: each row records a price change observed during a sync
+// (or status change like Sold/Pending). Used to compute market snapshots
+// (price reductions, recent sales) without losing history when listings
+// re-update.
+export const mlsPriceHistory = sqliteTable("mls_price_history", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  listingId: text("listing_id").notNull(),
+  oldPrice: integer("old_price"),
+  newPrice: integer("new_price"),
+  oldStatus: text("old_status"),
+  newStatus: text("new_status"),
+  changedAt: text("changed_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export type MlsPriceHistory = typeof mlsPriceHistory.$inferSelect;
+export type InsertMlsPriceHistory = typeof mlsPriceHistory.$inferInsert;
 
 export type Neighbourhood = typeof neighbourhoods.$inferSelect;
 export type InsertNeighbourhood = typeof neighbourhoods.$inferInsert;

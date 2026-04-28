@@ -13,6 +13,8 @@ import {
   savedSearches,
   socialPosts,
   condoBuildings,
+  leadAlerts,
+  mlsPriceHistory,
 } from "@shared/schema";
 import type {
   User,
@@ -41,6 +43,10 @@ import type {
   InsertSocialPost,
   CondoBuilding,
   InsertCondoBuilding,
+  LeadAlert,
+  InsertLeadAlert,
+  MlsPriceHistory,
+  InsertMlsPriceHistory,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
@@ -243,6 +249,31 @@ sqlite.exec(`
     body TEXT NOT NULL,
     sort_order INTEGER NOT NULL DEFAULT 0
   );
+  CREATE TABLE IF NOT EXISTS lead_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    lead_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    filters TEXT NOT NULL DEFAULT '{}',
+    frequency TEXT NOT NULL DEFAULT 'daily',
+    instant INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    last_sent_at TEXT,
+    last_match_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS mls_price_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    listing_id TEXT NOT NULL,
+    old_price INTEGER,
+    new_price INTEGER,
+    old_status TEXT,
+    new_status TEXT,
+    changed_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_mls_price_history_listing
+    ON mls_price_history(listing_id, changed_at);
+  CREATE INDEX IF NOT EXISTS idx_mls_price_history_changed_at
+    ON mls_price_history(changed_at);
   CREATE TABLE IF NOT EXISTS condo_buildings (
     slug TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -339,6 +370,10 @@ try {
       ["suite", "TEXT"],
       ["legal_suite_yn", "INTEGER"],
       ["suite_location", "TEXT"],
+      ["previous_price", "INTEGER"],
+      ["price_changed_at", "TEXT"],
+      ["removed_at", "TEXT"],
+      ["removed_reason", "TEXT"],
     ];
     for (const [name, type] of additions) {
       if (!existing.has(name)) {
@@ -592,9 +627,48 @@ export class DatabaseStorage implements IStorage {
   upsertMlsListing(data: InsertMlsListing): MlsListing {
     const existing = db.select().from(mlsListings).where(eq(mlsListings.id, data.id!)).get();
     if (existing) {
+      // Track price + status changes for the market snapshot.
+      const now = new Date().toISOString();
+      const newPrice = (data.listPrice as number | null) ?? null;
+      const newStatus = (data.status as string) ?? existing.status;
+      const priceChanged =
+        newPrice != null && existing.listPrice != null && newPrice !== existing.listPrice;
+      const statusChanged = newStatus !== existing.status;
+      if (priceChanged || statusChanged) {
+        try {
+          db.insert(mlsPriceHistory).values({
+            listingId: existing.id,
+            oldPrice: existing.listPrice,
+            newPrice,
+            oldStatus: existing.status,
+            newStatus,
+            changedAt: now,
+          }).run();
+        } catch (e) {
+          console.warn("[storage] price-history insert failed:", (e as any)?.message);
+        }
+      }
+      const patch: any = {
+        ...data,
+        syncedAt: now,
+      };
+      if (priceChanged) {
+        patch.previousPrice = existing.listPrice;
+        patch.priceChangedAt = now;
+      }
+      // If a previously-Active listing becomes anything else, mark removed and capture reason.
+      if (statusChanged && existing.status === "Active" && newStatus !== "Active") {
+        patch.removedAt = now;
+        patch.removedReason = newStatus;
+      }
+      // If a previously-removed listing becomes Active again, clear removal markers.
+      if (statusChanged && existing.status !== "Active" && newStatus === "Active") {
+        patch.removedAt = null;
+        patch.removedReason = null;
+      }
       return db
         .update(mlsListings)
-        .set({ ...data, syncedAt: new Date().toISOString() })
+        .set(patch)
         .where(eq(mlsListings.id, data.id!))
         .returning()
         .get();
@@ -918,14 +992,33 @@ export class DatabaseStorage implements IStorage {
       void slice;
     }
     const activeRows = db
-      .select({ id: mlsListings.id })
+      .select({ id: mlsListings.id, status: mlsListings.status })
       .from(mlsListings)
       .where(eq(mlsListings.status, "Active"))
-      .all() as { id: string }[];
+      .all() as { id: string; status: string }[];
     const keepSet = new Set(keep);
-    const toRemove = activeRows.map((r) => r.id).filter((id) => !keepSet.has(id));
-    for (const id of toRemove) {
-      db.update(mlsListings).set({ status: "Removed" }).where(eq(mlsListings.id, id)).run();
+    const toRemove = activeRows.filter((r) => !keepSet.has(r.id));
+    const now = new Date().toISOString();
+    for (const r of toRemove) {
+      // Reason "Unknown" because the Pillar 9 feed dropped the listing without
+      // telling us why. The cron-side reconciliation can refine to Sold/Expired
+      // by querying the Sold/Expired class once per run (future enhancement).
+      db.update(mlsListings)
+        .set({
+          status: "Removed",
+          removedAt: now,
+          removedReason: "Unknown",
+        })
+        .where(eq(mlsListings.id, r.id))
+        .run();
+      try {
+        db.insert(mlsPriceHistory).values({
+          listingId: r.id,
+          oldStatus: r.status,
+          newStatus: "Removed",
+          changedAt: now,
+        }).run();
+      } catch {}
       total++;
     }
     return total;
@@ -1090,6 +1183,175 @@ export class DatabaseStorage implements IStorage {
       )
       .sort((a, b) => b.listPrice - a.listPrice)
       .slice(0, limit);
+  }
+  // ---- Lead Alerts -------------------------------------------------------
+  listLeadAlerts(leadId: number): LeadAlert[] {
+    return db
+      .select()
+      .from(leadAlerts)
+      .where(eq(leadAlerts.leadId, leadId))
+      .orderBy(desc(leadAlerts.createdAt))
+      .all();
+  }
+  getLeadAlert(id: number): LeadAlert | undefined {
+    return db.select().from(leadAlerts).where(eq(leadAlerts.id, id)).get();
+  }
+  createLeadAlert(data: InsertLeadAlert): LeadAlert {
+    return db.insert(leadAlerts).values(data).returning().get();
+  }
+  updateLeadAlert(id: number, patch: Partial<LeadAlert>): LeadAlert | undefined {
+    const updated = db.update(leadAlerts).set(patch).where(eq(leadAlerts.id, id)).returning().get();
+    return updated;
+  }
+  deleteLeadAlert(id: number): boolean {
+    const r = db.delete(leadAlerts).where(eq(leadAlerts.id, id)).run();
+    return (r.changes ?? 0) > 0;
+  }
+  // Returns alerts that are "due" — active, instant=false, and last_sent_at
+  // is older than the frequency cadence (or null).
+  dueLeadAlerts(now = new Date()): LeadAlert[] {
+    const all = db.select().from(leadAlerts).where(eq(leadAlerts.active, true)).all();
+    const cutoffMs: Record<string, number> = {
+      daily: 24 * 60 * 60 * 1000,
+      weekly: 7 * 24 * 60 * 60 * 1000,
+      monthly: 30 * 24 * 60 * 60 * 1000,
+    };
+    return all.filter((a) => {
+      if (a.instant) return false; // instant alerts fire on listing-event hooks
+      const lim = cutoffMs[a.frequency];
+      if (!lim) return false;
+      if (!a.lastSentAt) return true;
+      return now.getTime() - new Date(a.lastSentAt).getTime() >= lim;
+    });
+  }
+  // ---- MLS price + status change history --------------------------------
+  recordMlsPriceChange(data: InsertMlsPriceHistory): void {
+    db.insert(mlsPriceHistory).values(data).run();
+  }
+  // ---- Market snapshot ---------------------------------------------------
+  // Returns counts of: new listings, sold, terminated/expired/withdrawn, and
+  // price reductions matching `filters` over the last `daysBack` days.
+  marketSnapshot(opts: {
+    filters?: any;
+    daysBack?: number;
+  }): {
+    newListings: number;
+    sold: number;
+    terminated: number;
+    priceReductions: number;
+    averageListPrice: number;
+    averageSoldPrice: number;
+    samples: {
+      newListings: any[];
+      priceReductions: any[];
+    };
+  } {
+    const daysBack = opts.daysBack ?? 30;
+    const cutoff = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
+
+    // Pull a candidate set using the same filter semantics as searchMlsListings
+    // BUT without the status=Active default — we want to also include sold
+    // and removed listings within the window.
+    const f = opts.filters ?? {};
+    // Build WHERE for the candidate set (no status restriction).
+    const where: any[] = [];
+    if (f.minPrice) where.push(gte(mlsListings.listPrice, Number(f.minPrice)));
+    if (f.maxPrice) where.push(lte(mlsListings.listPrice, Number(f.maxPrice)));
+    if (f.beds) where.push(gte(mlsListings.beds, Number(f.beds)));
+    if (f.baths) where.push(gte(mlsListings.baths, Number(f.baths)));
+    if (f.propertyType && f.propertyType !== "any") where.push(eq(mlsListings.propertyType, f.propertyType));
+    if (f.neighbourhood) where.push(eq(mlsListings.neighbourhood, f.neighbourhood));
+    if (f.minSqft) where.push(gte(mlsListings.sqft, Number(f.minSqft)));
+    if (f.maxSqft) where.push(lte(mlsListings.sqft, Number(f.maxSqft)));
+
+    const candidates = where.length
+      ? db.select().from(mlsListings).where(and(...where)!).all()
+      : db.select().from(mlsListings).all();
+
+    const candidateIds = new Set(candidates.map((c) => c.id));
+
+    // 1) new listings — synced after cutoff and currently Active
+    const newListings = candidates.filter(
+      (l) => l.status === "Active" && l.syncedAt > cutoff,
+    );
+
+    // 2) sold — current status Sold OR removedReason=Sold within window
+    const sold = candidates.filter(
+      (l) =>
+        (l.status === "Sold" || l.removedReason === "Sold") &&
+        ((l.removedAt && l.removedAt > cutoff) || (l.syncedAt > cutoff && l.status === "Sold")),
+    );
+
+    // 3) terminated/expired/withdrawn within window (non-Sold removals)
+    const terminated = candidates.filter(
+      (l) =>
+        l.removedAt &&
+        l.removedAt > cutoff &&
+        l.removedReason &&
+        l.removedReason !== "Sold",
+    );
+
+    // 4) price reductions — listings with priceChangedAt in window AND new price
+    //    less than previous price. Plus history-table check for older changes
+    //    that may have reverted.
+    const priceReductionRows = db
+      .select()
+      .from(mlsPriceHistory)
+      .where(gte(mlsPriceHistory.changedAt, cutoff))
+      .all();
+    const reductionByListing = new Map<string, MlsPriceHistory>();
+    for (const h of priceReductionRows) {
+      if (!candidateIds.has(h.listingId)) continue;
+      if (h.oldPrice == null || h.newPrice == null) continue;
+      if (h.newPrice >= h.oldPrice) continue;
+      // Keep most recent reduction per listing
+      const ex = reductionByListing.get(h.listingId);
+      if (!ex || ex.changedAt < h.changedAt) reductionByListing.set(h.listingId, h);
+    }
+    const priceReductions = Array.from(reductionByListing.values());
+
+    // Aggregate stats
+    const activePrices = candidates
+      .filter((l) => l.status === "Active")
+      .map((l) => l.listPrice);
+    const soldPrices = sold.map((l) => l.soldPrice ?? l.listPrice);
+
+    const avg = (arr: number[]) =>
+      arr.length === 0 ? 0 : Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
+
+    return {
+      newListings: newListings.length,
+      sold: sold.length,
+      terminated: terminated.length,
+      priceReductions: priceReductions.length,
+      averageListPrice: avg(activePrices),
+      averageSoldPrice: avg(soldPrices),
+      samples: {
+        newListings: newListings.slice(0, 6).map((l) => ({
+          id: l.id,
+          fullAddress: l.fullAddress,
+          listPrice: l.listPrice,
+          neighbourhood: l.neighbourhood,
+          syncedAt: l.syncedAt,
+          beds: l.beds,
+          baths: l.baths,
+          sqft: l.sqft,
+          heroImage: l.heroImage,
+        })),
+        priceReductions: priceReductions.slice(0, 6).map((h) => {
+          const listing = candidates.find((c) => c.id === h.listingId);
+          return {
+            id: h.listingId,
+            oldPrice: h.oldPrice,
+            newPrice: h.newPrice,
+            changedAt: h.changedAt,
+            fullAddress: listing?.fullAddress,
+            neighbourhood: listing?.neighbourhood,
+            heroImage: listing?.heroImage,
+          };
+        }),
+      },
+    };
   }
   // ---- Testimonials -------------------------------------------------------
   listTestimonials(): Testimonial[] {

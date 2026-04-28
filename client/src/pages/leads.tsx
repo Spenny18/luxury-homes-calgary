@@ -273,6 +273,9 @@ export default function LeadsPage() {
                     </Card>
                   )}
 
+                  {/* Email alerts + market snapshot */}
+                  <LeadAlertsAndSnapshot leadId={selected.id} />
+
                   {/* Conversation */}
                   <div>
                     <div className="eyebrow text-muted-foreground mb-3">Conversation</div>
@@ -379,5 +382,375 @@ export default function LeadsPage() {
         </Card>
       </div>
     </AppShell>
+  );
+}
+
+// =============================================================================
+// Email-alerts + 30-day market-snapshot panel — shown inside each lead detail.
+// =============================================================================
+
+interface LeadAlertRow {
+  id: number;
+  leadId: number;
+  label: string;
+  filters: any;
+  frequency: "instant" | "daily" | "weekly" | "monthly";
+  active: boolean;
+  lastSentAt: string | null;
+  lastMatchCount: number;
+  createdAt: string;
+}
+
+interface MarketSnapshot {
+  newListings: number;
+  sold: number;
+  terminated: number;
+  priceReductions: number;
+  averageListPrice: number;
+  averageSoldPrice: number;
+  samples: {
+    newListings: any[];
+    priceReductions: any[];
+  };
+}
+
+function LeadAlertsAndSnapshot({ leadId }: { leadId: number }) {
+  const qc = useQueryClient();
+  const { data: alerts = [] } = useQuery<LeadAlertRow[]>({
+    queryKey: ["/api/leads", leadId, "alerts"],
+    queryFn: async () => {
+      const r = await apiRequest("GET", `/api/leads/${leadId}/alerts`);
+      return r.json();
+    },
+  });
+
+  const [creating, setCreating] = useState(false);
+  const [draft, setDraft] = useState({
+    label: "",
+    frequency: "daily" as LeadAlertRow["frequency"],
+    minPrice: "",
+    maxPrice: "",
+    beds: "",
+    baths: "",
+    neighbourhood: "",
+    propertyType: "",
+  });
+
+  const createAlert = useMutation({
+    mutationFn: async () => {
+      const filters: any = {};
+      if (draft.minPrice) filters.minPrice = Number(draft.minPrice);
+      if (draft.maxPrice) filters.maxPrice = Number(draft.maxPrice);
+      if (draft.beds) filters.beds = Number(draft.beds);
+      if (draft.baths) filters.baths = Number(draft.baths);
+      if (draft.neighbourhood) filters.neighbourhood = draft.neighbourhood;
+      if (draft.propertyType) filters.propertyType = draft.propertyType;
+      const r = await apiRequest("POST", `/api/leads/${leadId}/alerts`, {
+        label: draft.label,
+        filters,
+        frequency: draft.frequency,
+      });
+      return r.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/leads", leadId, "alerts"] });
+      setCreating(false);
+      setDraft({
+        label: "",
+        frequency: "daily",
+        minPrice: "",
+        maxPrice: "",
+        beds: "",
+        baths: "",
+        neighbourhood: "",
+        propertyType: "",
+      });
+    },
+  });
+
+  const updateAlert = useMutation({
+    mutationFn: async ({ id, patch }: { id: number; patch: Partial<LeadAlertRow> }) => {
+      const r = await apiRequest("PATCH", `/api/leads/${leadId}/alerts/${id}`, patch);
+      return r.json();
+    },
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["/api/leads", leadId, "alerts"] }),
+  });
+
+  const deleteAlert = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/leads/${leadId}/alerts/${id}`);
+    },
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["/api/leads", leadId, "alerts"] }),
+  });
+
+  return (
+    <div className="space-y-5">
+      {/* Email alerts list */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <div className="eyebrow text-muted-foreground">Email alerts</div>
+              <div className="font-serif text-base mt-0.5" style={{ letterSpacing: "-0.005em" }}>
+                Saved searches that email this lead
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="rounded-sm font-display tracking-[0.14em] text-[10px] h-8"
+              onClick={() => setCreating((v) => !v)}
+            >
+              {creating ? "CANCEL" : "+ NEW ALERT"}
+            </Button>
+          </div>
+
+          {alerts.length === 0 && !creating && (
+            <div className="text-xs text-muted-foreground italic">
+              No alerts yet. Create one to email this lead when matching listings hit the MLS.
+            </div>
+          )}
+
+          {alerts.length > 0 && (
+            <ul className="divide-y divide-border -mx-4">
+              {alerts.map((a) => (
+                <li key={a.id} className="px-4 py-3 flex items-start gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate">{a.label}</div>
+                    <div className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
+                      <span className="font-display tracking-[0.14em] uppercase">{a.frequency}</span>
+                      {a.lastSentAt ? (
+                        <span>last sent {timeAgo(a.lastSentAt)}</span>
+                      ) : (
+                        <span>never sent</span>
+                      )}
+                      <span>· {a.lastMatchCount} matches</span>
+                    </div>
+                    {a.filters && Object.keys(a.filters).length > 0 && (
+                      <div className="text-[10px] text-muted-foreground italic mt-1 truncate">
+                        {Object.entries(a.filters)
+                          .map(([k, v]) => `${k}=${v}`)
+                          .join(" · ")}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Select
+                      value={a.frequency}
+                      onValueChange={(v) =>
+                        updateAlert.mutate({ id: a.id, patch: { frequency: v as any } })
+                      }
+                    >
+                      <SelectTrigger className="h-7 w-[100px] rounded-sm text-[10px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="instant">Instant</SelectItem>
+                        <SelectItem value="daily">Daily</SelectItem>
+                        <SelectItem value="weekly">Weekly</SelectItem>
+                        <SelectItem value="monthly">Monthly</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="rounded-sm h-7 px-2 text-[10px]"
+                      onClick={() =>
+                        updateAlert.mutate({ id: a.id, patch: { active: !a.active } })
+                      }
+                    >
+                      {a.active ? "ON" : "OFF"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="rounded-sm h-7 px-2 text-[10px] text-destructive"
+                      onClick={() => {
+                        if (confirm(`Delete alert "${a.label}"?`)) deleteAlert.mutate(a.id);
+                      }}
+                    >
+                      DELETE
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {creating && (
+            <div className="mt-3 pt-3 border-t border-border space-y-3">
+              <Input
+                value={draft.label}
+                onChange={(e) => setDraft({ ...draft, label: e.target.value })}
+                placeholder="Label (e.g. Aspen Woods 4+ bed under $2M)"
+                className="rounded-sm h-9 text-sm"
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  value={draft.minPrice}
+                  onChange={(e) =>
+                    setDraft({ ...draft, minPrice: e.target.value.replace(/\D/g, "") })
+                  }
+                  placeholder="Min $"
+                  className="rounded-sm h-9 text-sm"
+                />
+                <Input
+                  value={draft.maxPrice}
+                  onChange={(e) =>
+                    setDraft({ ...draft, maxPrice: e.target.value.replace(/\D/g, "") })
+                  }
+                  placeholder="Max $"
+                  className="rounded-sm h-9 text-sm"
+                />
+                <Input
+                  value={draft.beds}
+                  onChange={(e) => setDraft({ ...draft, beds: e.target.value.replace(/\D/g, "") })}
+                  placeholder="Min beds"
+                  className="rounded-sm h-9 text-sm"
+                />
+                <Input
+                  value={draft.baths}
+                  onChange={(e) => setDraft({ ...draft, baths: e.target.value.replace(/\D/g, "") })}
+                  placeholder="Min baths"
+                  className="rounded-sm h-9 text-sm"
+                />
+                <Input
+                  value={draft.neighbourhood}
+                  onChange={(e) => setDraft({ ...draft, neighbourhood: e.target.value })}
+                  placeholder="Neighbourhood"
+                  className="rounded-sm h-9 text-sm col-span-2"
+                />
+              </div>
+              <Select
+                value={draft.frequency}
+                onValueChange={(v) => setDraft({ ...draft, frequency: v as any })}
+              >
+                <SelectTrigger className="h-9 rounded-sm text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="instant">Instant — every match emails immediately</SelectItem>
+                  <SelectItem value="daily">Daily — one digest per day</SelectItem>
+                  <SelectItem value="weekly">Weekly — one digest per week</SelectItem>
+                  <SelectItem value="monthly">Monthly — one digest per month</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                size="sm"
+                className="rounded-sm font-display tracking-[0.14em] text-[10px] h-8 w-full"
+                disabled={!draft.label.trim() || createAlert.isPending}
+                onClick={() => createAlert.mutate()}
+              >
+                CREATE ALERT
+              </Button>
+              <p className="text-[10px] text-muted-foreground italic">
+                Note: email delivery requires SMTP credentials on Fly. Alerts will save and the
+                cron will pick them up once those are configured. Until then this acts as the
+                rules definition + market-snapshot driver.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Market snapshot — driven by the FIRST active alert's filters, falling
+          back to the lead's listing-context if no alerts exist. */}
+      <MarketSnapshotCard
+        filters={
+          alerts.find((a) => a.active)?.filters ?? null
+        }
+      />
+    </div>
+  );
+}
+
+function MarketSnapshotCard({ filters }: { filters: any | null }) {
+  const queryString = useMemo(() => {
+    const p = new URLSearchParams();
+    if (filters) {
+      for (const [k, v] of Object.entries(filters)) {
+        if (v != null && v !== "") p.set(k, String(v));
+      }
+    }
+    p.set("daysBack", "30");
+    return p.toString();
+  }, [filters]);
+
+  const { data, isLoading } = useQuery<MarketSnapshot>({
+    queryKey: ["/api/admin/market-snapshot", queryString],
+    queryFn: async () => {
+      const r = await apiRequest("GET", `/api/admin/market-snapshot?${queryString}`);
+      return r.json();
+    },
+  });
+
+  if (!filters) {
+    return (
+      <Card>
+        <CardContent className="p-4 text-xs text-muted-foreground italic">
+          Add an alert above to see a 30-day market snapshot for this lead's filter set.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="eyebrow text-muted-foreground mb-1">30-day market snapshot</div>
+        <div className="font-serif text-base mb-3" style={{ letterSpacing: "-0.005em" }}>
+          What's happened in this slice over the last 30 days
+        </div>
+        {isLoading || !data ? (
+          <div className="text-xs text-muted-foreground italic">Loading…</div>
+        ) : (
+          <>
+            <div className="grid grid-cols-4 gap-2">
+              <SnapStat label="New" value={data.newListings} />
+              <SnapStat label="Sold" value={data.sold} />
+              <SnapStat label="Terminated" value={data.terminated} />
+              <SnapStat label="Reduced" value={data.priceReductions} />
+            </div>
+            {data.averageListPrice > 0 && (
+              <div className="mt-3 text-[11px] text-muted-foreground flex items-center gap-3 flex-wrap">
+                <span>Avg list: ${(data.averageListPrice / 1000).toFixed(0)}K</span>
+                {data.averageSoldPrice > 0 && (
+                  <span>Avg sold: ${(data.averageSoldPrice / 1000).toFixed(0)}K</span>
+                )}
+              </div>
+            )}
+            {data.samples?.priceReductions?.length > 0 && (
+              <div className="mt-4">
+                <div className="eyebrow text-muted-foreground mb-1.5">Recent price reductions</div>
+                <ul className="divide-y divide-border text-[12px]">
+                  {data.samples.priceReductions.slice(0, 3).map((r: any, i: number) => (
+                    <li key={i} className="py-2 flex items-center gap-2">
+                      <div className="flex-1 min-w-0 truncate">{r.fullAddress}</div>
+                      <span className="line-through text-muted-foreground">
+                        ${(r.oldPrice / 1000).toFixed(0)}K
+                      </span>
+                      <span className="font-medium">${(r.newPrice / 1000).toFixed(0)}K</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function SnapStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-sm bg-secondary/40 px-2 py-2 text-center">
+      <div className="font-serif text-xl text-foreground" style={{ letterSpacing: "-0.01em" }}>
+        {value}
+      </div>
+      <div className="eyebrow text-muted-foreground mt-0.5 text-[9px]">{label}</div>
+    </div>
   );
 }

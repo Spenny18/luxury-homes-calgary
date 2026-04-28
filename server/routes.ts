@@ -328,6 +328,78 @@ export async function registerRoutes(
     res.json(msg);
   });
 
+  // ---------- LEAD EMAIL ALERTS ----------
+  app.get("/api/leads/:id/alerts", requireAuth, (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid id" });
+    const items = storage.listLeadAlerts(id).map((a) => ({
+      ...a,
+      filters: (() => { try { return JSON.parse(a.filters); } catch { return {}; } })(),
+    }));
+    res.json(items);
+  });
+
+  app.post("/api/leads/:id/alerts", requireAuth, (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid id" });
+    const { label, filters, frequency, instant, active } = req.body ?? {};
+    if (!label || typeof label !== "string") {
+      return res.status(400).json({ message: "Label required" });
+    }
+    const created = storage.createLeadAlert({
+      leadId: id,
+      label,
+      filters: typeof filters === "string" ? filters : JSON.stringify(filters ?? {}),
+      frequency: frequency ?? "daily",
+      instant: instant === true || frequency === "instant",
+      active: active !== false,
+    } as any);
+    res.json(created);
+  });
+
+  app.patch("/api/leads/:leadId/alerts/:alertId", requireAuth, (req, res) => {
+    const alertId = parseInt(req.params.alertId, 10);
+    if (!Number.isFinite(alertId)) return res.status(400).json({ message: "Invalid id" });
+    const patch: any = { ...(req.body ?? {}) };
+    if (patch.filters && typeof patch.filters !== "string") {
+      patch.filters = JSON.stringify(patch.filters);
+    }
+    if (patch.frequency === "instant") patch.instant = true;
+    if (patch.frequency && patch.frequency !== "instant") patch.instant = false;
+    const updated = storage.updateLeadAlert(alertId, patch);
+    if (!updated) return res.status(404).json({ message: "Alert not found" });
+    res.json(updated);
+  });
+
+  app.delete("/api/leads/:leadId/alerts/:alertId", requireAuth, (req, res) => {
+    const alertId = parseInt(req.params.alertId, 10);
+    if (!Number.isFinite(alertId)) return res.status(400).json({ message: "Invalid id" });
+    res.json({ ok: storage.deleteLeadAlert(alertId) });
+  });
+
+  // ---------- MARKET SNAPSHOT ----------
+  // GET /api/admin/market-snapshot?<filters>&daysBack=30
+  // Returns counts of new / sold / terminated / price-reduction listings
+  // matching the filter set over the last `daysBack` days.
+  app.get("/api/admin/market-snapshot", requireAuth, (req, res) => {
+    const q = req.query;
+    const num = (v: any) => (v != null && v !== "" ? Number(v) : undefined);
+    const str = (v: any) => (typeof v === "string" && v.length ? v : undefined);
+    const filters: any = {
+      minPrice: num(q.minPrice),
+      maxPrice: num(q.maxPrice),
+      beds: num(q.beds),
+      baths: num(q.baths),
+      propertyType: str(q.propertyType),
+      neighbourhood: str(q.neighbourhood),
+      minSqft: num(q.minSqft),
+      maxSqft: num(q.maxSqft),
+    };
+    const daysBack = num(q.daysBack) ?? 30;
+    const snap = storage.marketSnapshot({ filters, daysBack });
+    res.json(snap);
+  });
+
   // ---------- TOURS ----------
   app.get("/api/tours", requireAuth, (_req, res) => {
     res.json(storage.listTours());
