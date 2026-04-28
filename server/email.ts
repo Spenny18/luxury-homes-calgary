@@ -237,3 +237,92 @@ function stat(label: string, value: number): string {
     </td>
   `;
 }
+
+// Stat-focused snapshot email — no listing cards. Used for alertType=snapshot.
+export function buildMarketSnapshotHtml(opts: {
+  leadName: string;
+  alertLabel: string;
+  origin: string;
+  snapshot: SnapshotData & { averageListPrice: number; averageSoldPrice: number };
+  daysBack: number;
+}): string {
+  const { leadName, alertLabel, origin, snapshot, daysBack } = opts;
+  const fmtPriceLong = (n: number) =>
+    n >= 1_000_000
+      ? `$${(n / 1_000_000).toFixed(2)}M`
+      : n >= 1_000
+        ? `$${Math.round(n / 1_000)}K`
+        : `$${n}`;
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:${BRAND.paper};font-family:'Manrope',Arial,sans-serif;color:${BRAND.black};">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:${BRAND.paper};">
+    <tr><td align="center" style="padding:32px 16px;">
+      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border:1px solid ${BRAND.border};">
+        <tr>
+          <td style="padding:32px 36px 16px;text-align:center;">
+            <div style="font-family:'Playfair Display',Georgia,serif;font-size:14px;font-weight:600;letter-spacing:0.18em;color:${BRAND.gold};text-transform:uppercase;">
+              RIVERS REAL ESTATE
+            </div>
+            <div style="font-family:'Manrope',Arial,sans-serif;font-size:11px;letter-spacing:0.18em;color:${BRAND.mute};margin-top:4px;">
+              ${daysBack}-DAY MARKET SNAPSHOT
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 36px 8px;">
+            <h1 style="font-family:'Playfair Display',Georgia,serif;font-size:30px;font-weight:600;color:${BRAND.black};margin:8px 0;letter-spacing:-0.01em;">
+              ${alertLabel} · last ${daysBack} days.
+            </h1>
+            <p style="font-family:'Manrope',Arial,sans-serif;font-size:15px;color:${BRAND.mute};line-height:1.5;margin:8px 0 0;">
+              Hi ${leadName.split(" ")[0]} — here's how your slice of the Calgary market has moved.
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 36px 0;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ${BRAND.border};">
+              <tr>
+                ${stat("New", snapshot.newListings)}
+                ${stat("Sold", snapshot.sold)}
+                ${stat("Terminated", snapshot.terminated)}
+                ${stat("Reduced", snapshot.priceReductions)}
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:18px 36px 8px;">
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td width="50%" style="padding-right:8px;">
+                  <div style="font-family:'Manrope',Arial,sans-serif;font-size:10px;letter-spacing:0.16em;color:${BRAND.mute};text-transform:uppercase;">AVERAGE LIST</div>
+                  <div style="font-family:'Playfair Display',Georgia,serif;font-size:24px;font-weight:600;color:${BRAND.black};margin-top:4px;letter-spacing:-0.01em;">${snapshot.averageListPrice ? fmtPriceLong(snapshot.averageListPrice) : "—"}</div>
+                </td>
+                <td width="50%" style="padding-left:8px;">
+                  <div style="font-family:'Manrope',Arial,sans-serif;font-size:10px;letter-spacing:0.16em;color:${BRAND.mute};text-transform:uppercase;">AVERAGE SOLD</div>
+                  <div style="font-family:'Playfair Display',Georgia,serif;font-size:24px;font-weight:600;color:${BRAND.black};margin-top:4px;letter-spacing:-0.01em;">${snapshot.averageSoldPrice ? fmtPriceLong(snapshot.averageSoldPrice) : "—"}</div>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 36px 32px;border-top:1px solid ${BRAND.border};text-align:center;">
+            <a href="${origin}/#/contact" style="display:inline-block;padding:11px 22px;background:${BRAND.black};color:#fff;text-decoration:none;font-family:'Manrope',Arial,sans-serif;font-size:11px;letter-spacing:0.22em;text-transform:uppercase;">Get in touch</a>
+            <p style="font-family:'Manrope',Arial,sans-serif;font-size:14px;color:${BRAND.black};line-height:1.5;margin:24px 0 6px;">
+              Chat soon, cheers!
+            </p>
+            <p style="font-family:'Playfair Display',Georgia,serif;font-size:18px;font-weight:600;color:${BRAND.black};margin:0;letter-spacing:-0.005em;">
+              Spencer Rivers
+            </p>
+            <p style="font-family:'Manrope',Arial,sans-serif;font-size:11px;color:${BRAND.mute};letter-spacing:0.12em;margin:4px 0 0;">
+              REALTOR® · RIVERS REAL ESTATE · (403) 966-9237
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+}

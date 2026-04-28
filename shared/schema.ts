@@ -434,12 +434,30 @@ export type PoiCacheRow = typeof poisCache.$inferSelect;
 export type InsertPoiCache = typeof poisCache.$inferInsert;
 
 // ---- Saved searches (buyer-side) ------------------------------------------
+// Unified table: both Spencer's personal searches (leadId = null, emails go
+// to SPENCER_NOTIFY_EMAIL or his account) and lead-attached searches (leadId
+// set, emails go to lead.email) live here.
 export const savedSearches = sqliteTable("saved_searches", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id").notNull(),
+  // Optional lead linkage. If set, emails address the lead; lastSentAt drives
+  // cadence. If null, the search is the agent's personal browsing search.
+  leadId: integer("lead_id"),
+  // Optional override for the email recipient. If null and leadId is set, we
+  // use lead.email. If null and leadId is null, we fall back to SPENCER_NOTIFY_EMAIL.
+  emailRecipient: text("email_recipient"),
   name: text("name").notNull(),
   filters: text("filters").notNull().default("{}"), // JSON: {minPrice, maxPrice, beds, neighbourhood, ...}
   emailAlerts: integer("email_alerts", { mode: "boolean" }).notNull().default(true),
+  // 'listings' = digest of new matches + price reductions; 'snapshot' = stats only
+  alertType: text("alert_type").notNull().default("listings"),
+  // instant | daily | weekly | monthly
+  frequency: text("frequency").notNull().default("daily"),
+  // True only when frequency = 'instant' (cron treats specially)
+  instant: integer("instant", { mode: "boolean" }).notNull().default(false),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  lastSentAt: text("last_sent_at"),
+  lastMatchCount: integer("last_match_count").notNull().default(0),
   lastRunAt: text("last_run_at"),
   matchCount: integer("match_count").notNull().default(0),
   createdAt: text("created_at")

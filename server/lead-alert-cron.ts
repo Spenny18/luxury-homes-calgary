@@ -13,7 +13,7 @@
 // If RESEND_API_KEY isn't set the cron logs and returns; nothing breaks.
 
 import { storage } from "./storage";
-import { sendEmail, buildLeadAlertHtml } from "./email";
+import { sendEmail, buildLeadAlertHtml, buildMarketSnapshotHtml } from "./email";
 
 const FREQ_DAYS: Record<string, number> = {
   instant: 1,
@@ -32,31 +32,40 @@ export async function runLeadAlertCycle(): Promise<{
 }> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
-    console.log("[lead-alerts] RESEND_API_KEY not set — skipping cycle");
+    console.log("[alerts] RESEND_API_KEY not set — skipping cycle");
     return { scanned: 0, sent: 0, skipped: 0, errors: 0 };
   }
   const origin = process.env.PUBLIC_ORIGIN || "https://luxury-homes-calgary.fly.dev";
-  const due = storage.dueLeadAlerts();
-  // Also pull instant alerts and treat them as due if any matching listing
-  // was synced within the last hour.
-  const allActive = storage
-    .listLeadAlerts(0) // (placeholder; we iterate per-lead next)
-    .filter(() => false);
-  void allActive;
+  const fallbackTo = process.env.SPENCER_NOTIFY_EMAIL || process.env.RESEND_FROM_EMAIL || "";
+  const due = storage.dueSavedSearches();
 
   let scanned = 0;
   let sent = 0;
   let skipped = 0;
   let errors = 0;
 
-  for (const alert of due) {
+  for (const alert of due as any[]) {
     scanned++;
     try {
-      const lead = storage.getLead(alert.leadId);
-      if (!lead || !lead.email) {
+      // Determine recipient: explicit override -> linked lead -> Spencer fallback.
+      let recipient: string | null = alert.emailRecipient || null;
+      let recipientName = "there";
+      if (!recipient && alert.leadId) {
+        const lead = storage.getLead(alert.leadId);
+        if (lead?.email) {
+          recipient = lead.email;
+          recipientName = lead.name || "there";
+        }
+      }
+      if (!recipient && fallbackTo) {
+        recipient = fallbackTo;
+        recipientName = "Spencer";
+      }
+      if (!recipient) {
         skipped++;
         continue;
       }
+
       const filters = (() => {
         try {
           return JSON.parse(alert.filters);
@@ -66,16 +75,16 @@ export async function runLeadAlertCycle(): Promise<{
       })();
       const daysBack = FREQ_DAYS[alert.frequency] ?? 1;
       const snap = storage.marketSnapshot({ filters, daysBack });
-      const totalMatches =
-        snap.newListings + snap.priceReductions;
-      // Don't send empty digests for instant/daily — but DO send for weekly +
-      // monthly so the lead always hears from you on cadence even if quiet.
+      const alertType = alert.alertType ?? "listings";
+
+      // For listings type: skip empty digests on short cadences.
+      const totalMatches = snap.newListings + snap.priceReductions;
       if (
+        alertType === "listings" &&
         totalMatches === 0 &&
         (alert.frequency === "instant" || alert.frequency === "daily")
       ) {
-        // Touch lastSentAt anyway so we don't recompute every cycle.
-        storage.updateLeadAlert(alert.id, {
+        storage.updateSavedSearch(alert.id, {
           lastSentAt: new Date().toISOString(),
           lastMatchCount: 0,
         });
@@ -83,42 +92,62 @@ export async function runLeadAlertCycle(): Promise<{
         continue;
       }
 
-      const html = buildLeadAlertHtml({
-        leadName: lead.name || "there",
-        alertLabel: alert.label,
-        origin,
-        newListings: snap.samples.newListings.slice(0, 6) as any[],
-        priceReductions: snap.samples.priceReductions
-          .slice(0, 6)
-          .map((r: any) => ({
-            id: r.id,
-            fullAddress: r.fullAddress ?? "",
-            listPrice: r.newPrice ?? 0,
-            previousPrice: r.oldPrice,
-            beds: 0,
-            baths: 0,
-            sqft: null,
-            neighbourhood: r.neighbourhood ?? null,
-            heroImage: r.heroImage ?? null,
-          })) as any[],
-        snapshot: {
-          newListings: snap.newListings,
-          sold: snap.sold,
-          terminated: snap.terminated,
-          priceReductions: snap.priceReductions,
-        },
-        daysBack,
-      });
-
-      const subject =
-        snap.newListings > 0
-          ? `${snap.newListings} new ${snap.newListings === 1 ? "listing" : "listings"} for ${alert.label}`
-          : snap.priceReductions > 0
-            ? `${snap.priceReductions} price ${snap.priceReductions === 1 ? "reduction" : "reductions"} for ${alert.label}`
-            : `Your ${alert.label} update`;
+      // Build HTML based on type.
+      let html: string;
+      let subject: string;
+      if (alertType === "snapshot") {
+        html = buildMarketSnapshotHtml({
+          leadName: recipientName,
+          alertLabel: alert.name,
+          origin,
+          snapshot: {
+            newListings: snap.newListings,
+            sold: snap.sold,
+            terminated: snap.terminated,
+            priceReductions: snap.priceReductions,
+            averageListPrice: snap.averageListPrice,
+            averageSoldPrice: snap.averageSoldPrice,
+          },
+          daysBack,
+        });
+        subject = `${alert.name} · ${daysBack}-day market snapshot`;
+      } else {
+        html = buildLeadAlertHtml({
+          leadName: recipientName,
+          alertLabel: alert.name,
+          origin,
+          newListings: snap.samples.newListings.slice(0, 6) as any[],
+          priceReductions: snap.samples.priceReductions
+            .slice(0, 6)
+            .map((r: any) => ({
+              id: r.id,
+              fullAddress: r.fullAddress ?? "",
+              listPrice: r.newPrice ?? 0,
+              previousPrice: r.oldPrice,
+              beds: 0,
+              baths: 0,
+              sqft: null,
+              neighbourhood: r.neighbourhood ?? null,
+              heroImage: r.heroImage ?? null,
+            })) as any[],
+          snapshot: {
+            newListings: snap.newListings,
+            sold: snap.sold,
+            terminated: snap.terminated,
+            priceReductions: snap.priceReductions,
+          },
+          daysBack,
+        });
+        subject =
+          snap.newListings > 0
+            ? `${snap.newListings} new ${snap.newListings === 1 ? "listing" : "listings"} for ${alert.name}`
+            : snap.priceReductions > 0
+              ? `${snap.priceReductions} price ${snap.priceReductions === 1 ? "reduction" : "reductions"} for ${alert.name}`
+              : `Your ${alert.name} update`;
+      }
 
       const result = await sendEmail({
-        to: lead.email,
+        to: recipient,
         subject,
         html,
         replyTo: process.env.RESEND_FROM_EMAIL,
@@ -126,23 +155,25 @@ export async function runLeadAlertCycle(): Promise<{
 
       if (result.ok) {
         sent++;
-        storage.updateLeadAlert(alert.id, {
+        storage.updateSavedSearch(alert.id, {
           lastSentAt: new Date().toISOString(),
           lastMatchCount: totalMatches,
         });
-        console.log(`[lead-alerts] sent #${alert.id} to ${lead.email} (matches=${totalMatches})`);
+        console.log(
+          `[alerts] sent #${alert.id} (${alertType}) to ${recipient} (matches=${totalMatches})`,
+        );
       } else {
         errors++;
-        console.error(`[lead-alerts] send failed #${alert.id}:`, result.error);
+        console.error(`[alerts] send failed #${alert.id}:`, result.error);
       }
     } catch (e: any) {
       errors++;
-      console.error(`[lead-alerts] error processing #${alert.id}:`, e?.message ?? e);
+      console.error(`[alerts] error processing #${alert.id}:`, e?.message ?? e);
     }
   }
 
   if (scanned > 0) {
-    console.log(`[lead-alerts] cycle done — scanned=${scanned} sent=${sent} skipped=${skipped} errors=${errors}`);
+    console.log(`[alerts] cycle done — scanned=${scanned} sent=${sent} skipped=${skipped} errors=${errors}`);
   }
   return { scanned, sent, skipped, errors };
 }

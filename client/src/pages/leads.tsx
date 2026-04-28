@@ -395,6 +395,7 @@ interface LeadAlertRow {
   label: string;
   filters: any;
   frequency: "instant" | "daily" | "weekly" | "monthly";
+  alertType: "listings" | "snapshot";
   active: boolean;
   lastSentAt: string | null;
   lastMatchCount: number;
@@ -428,6 +429,7 @@ function LeadAlertsAndSnapshot({ leadId }: { leadId: number }) {
   const [draft, setDraft] = useState({
     label: "",
     frequency: "daily" as LeadAlertRow["frequency"],
+    alertType: "listings" as "listings" | "snapshot",
     minPrice: "",
     maxPrice: "",
     beds: "",
@@ -449,6 +451,7 @@ function LeadAlertsAndSnapshot({ leadId }: { leadId: number }) {
         label: draft.label,
         filters,
         frequency: draft.frequency,
+        alertType: draft.alertType,
       });
       return r.json();
     },
@@ -458,6 +461,7 @@ function LeadAlertsAndSnapshot({ leadId }: { leadId: number }) {
       setDraft({
         label: "",
         frequency: "daily",
+        alertType: "listings",
         minPrice: "",
         maxPrice: "",
         beds: "",
@@ -540,6 +544,9 @@ function LeadAlertsAndSnapshot({ leadId }: { leadId: number }) {
                     <div className="text-sm font-medium truncate">{a.label}</div>
                     <div className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
                       <span className="font-display tracking-[0.14em] uppercase">{a.frequency}</span>
+                      <span className="font-display tracking-[0.14em] uppercase">
+                        · {(a as any).alertType === "snapshot" ? "SNAPSHOT" : "PROPERTY"}
+                      </span>
                       {a.lastSentAt ? (
                         <span>last sent {timeAgo(a.lastSentAt)}</span>
                       ) : (
@@ -616,6 +623,36 @@ function LeadAlertsAndSnapshot({ leadId }: { leadId: number }) {
                 placeholder="Label (e.g. Aspen Woods 4+ bed under $2M)"
                 className="rounded-sm h-9 text-sm"
               />
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDraft({ ...draft, alertType: "listings" })}
+                  className={`px-3 py-2 rounded-sm border text-[11px] font-display tracking-[0.16em] transition-colors ${
+                    draft.alertType === "listings"
+                      ? "bg-foreground text-background border-foreground"
+                      : "bg-background border-border hover:bg-secondary/40"
+                  }`}
+                >
+                  PROPERTY ALERTS
+                  <div className="font-sans normal-case tracking-normal text-[10px] mt-0.5 opacity-80">
+                    New matches + price reductions
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDraft({ ...draft, alertType: "snapshot" })}
+                  className={`px-3 py-2 rounded-sm border text-[11px] font-display tracking-[0.16em] transition-colors ${
+                    draft.alertType === "snapshot"
+                      ? "bg-foreground text-background border-foreground"
+                      : "bg-background border-border hover:bg-secondary/40"
+                  }`}
+                >
+                  MARKET SNAPSHOT
+                  <div className="font-sans normal-case tracking-normal text-[10px] mt-0.5 opacity-80">
+                    Stats only · no listings
+                  </div>
+                </button>
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <Input
                   value={draft.minPrice}

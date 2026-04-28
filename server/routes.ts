@@ -328,45 +328,78 @@ export async function registerRoutes(
     res.json(msg);
   });
 
-  // ---------- LEAD EMAIL ALERTS ----------
+  // ---------- LEAD EMAIL ALERTS (alias to saved_searches) ----------
+  // Preserved for backward compat. Lead-attached alerts now live in
+  // saved_searches with leadId set; these endpoints are thin proxies that
+  // map field names (label -> name) and force leadId.
   app.get("/api/leads/:id/alerts", requireAuth, (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid id" });
-    const items = storage.listLeadAlerts(id).map((a) => ({
-      ...a,
-      filters: (() => { try { return JSON.parse(a.filters); } catch { return {}; } })(),
+    const items = storage.listSavedSearchesByLead(id).map((s: any) => ({
+      // Legacy shape: id, leadId, label, filters, frequency, instant, active,
+      // lastSentAt, lastMatchCount, createdAt — front-end reads these names.
+      id: s.id,
+      leadId: s.leadId,
+      label: s.name,
+      filters: (() => { try { return JSON.parse(s.filters); } catch { return {}; } })(),
+      frequency: s.frequency ?? "daily",
+      instant: !!s.instant,
+      active: s.active !== false,
+      alertType: s.alertType ?? "listings",
+      lastSentAt: s.lastSentAt,
+      lastMatchCount: s.lastMatchCount ?? 0,
+      createdAt: s.createdAt,
     }));
     res.json(items);
   });
 
   app.post("/api/leads/:id/alerts", requireAuth, (req, res) => {
+    const userId = (req as any).authUserId as number;
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid id" });
-    const { label, filters, frequency, instant, active } = req.body ?? {};
+    const { label, filters, frequency, instant, active, alertType } = req.body ?? {};
     if (!label || typeof label !== "string") {
       return res.status(400).json({ message: "Label required" });
     }
-    const created = storage.createLeadAlert({
+    const created = storage.createSavedSearch({
+      userId,
       leadId: id,
-      label,
-      filters: typeof filters === "string" ? filters : JSON.stringify(filters ?? {}),
+      name: label,
+      filters: filters ?? {},
+      emailAlerts: true,
+      alertType: alertType ?? "listings",
       frequency: frequency ?? "daily",
       instant: instant === true || frequency === "instant",
       active: active !== false,
     } as any);
-    res.json(created);
+    res.json({
+      id: created.id,
+      leadId: (created as any).leadId,
+      label: created.name,
+      filters: (() => { try { return JSON.parse(created.filters); } catch { return {}; } })(),
+      frequency: (created as any).frequency,
+      instant: !!(created as any).instant,
+      active: (created as any).active !== false,
+      alertType: (created as any).alertType ?? "listings",
+      createdAt: created.createdAt,
+    });
   });
 
   app.patch("/api/leads/:leadId/alerts/:alertId", requireAuth, (req, res) => {
     const alertId = parseInt(req.params.alertId, 10);
     if (!Number.isFinite(alertId)) return res.status(400).json({ message: "Invalid id" });
     const patch: any = { ...(req.body ?? {}) };
+    // Map legacy field name 'label' -> 'name'
+    if (patch.label && !patch.name) {
+      patch.name = patch.label;
+      delete patch.label;
+    }
     if (patch.filters && typeof patch.filters !== "string") {
       patch.filters = JSON.stringify(patch.filters);
     }
     if (patch.frequency === "instant") patch.instant = true;
     if (patch.frequency && patch.frequency !== "instant") patch.instant = false;
-    const updated = storage.updateLeadAlert(alertId, patch);
+    const updated = storage.updateSavedSearch(alertId, patch);
     if (!updated) return res.status(404).json({ message: "Alert not found" });
     res.json(updated);
   });
@@ -374,21 +407,27 @@ export async function registerRoutes(
   app.delete("/api/leads/:leadId/alerts/:alertId", requireAuth, (req, res) => {
     const alertId = parseInt(req.params.alertId, 10);
     if (!Number.isFinite(alertId)) return res.status(400).json({ message: "Invalid id" });
-    res.json({ ok: storage.deleteLeadAlert(alertId) });
+    res.json({ ok: storage.deleteSavedSearch(alertId) });
   });
 
   // Manual fire — emails the alert immediately regardless of frequency cadence.
-  // Useful for testing sends or flushing a digest on demand.
   app.post("/api/leads/:leadId/alerts/:alertId/send", requireAuth, async (req, res) => {
     const alertId = parseInt(req.params.alertId, 10);
     if (!Number.isFinite(alertId)) return res.status(400).json({ message: "Invalid id" });
-    const alert = storage.getLeadAlert(alertId);
-    if (!alert) return res.status(404).json({ message: "Alert not found" });
-    // Fire just this one alert by temporarily forcing it through the cycle.
-    // Simpler approach: import and run inline.
     const { runLeadAlertCycle } = await import("./lead-alert-cron");
-    // Force a re-fire by clearing lastSentAt so the alert appears due.
-    storage.updateLeadAlert(alertId, { lastSentAt: null });
+    // Force a re-fire by clearing lastSentAt on the matching saved_search.
+    storage.updateSavedSearch(alertId, { lastSentAt: null });
+    const result = await runLeadAlertCycle();
+    res.json(result);
+  });
+
+  // Same manual fire but for a saved_search id directly (works for personal
+  // searches too).
+  app.post("/api/saved-searches/:id/send", requireAuth, async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid id" });
+    const { runLeadAlertCycle } = await import("./lead-alert-cron");
+    storage.updateSavedSearch(id, { lastSentAt: null });
     const result = await runLeadAlertCycle();
     res.json(result);
   });
@@ -1073,7 +1112,12 @@ out center tags;`;
   // ---------- SAVED SEARCHES (auth) ----------
   app.get("/api/saved-searches", requireAuth, (req, res) => {
     const userId = (req as any).authUserId as number;
-    const items = storage.listSavedSearches(userId).map((s) => ({
+    const leadIdStr = typeof req.query.leadId === "string" ? req.query.leadId : "";
+    const leadId = leadIdStr ? parseInt(leadIdStr, 10) : null;
+    let rows = leadId
+      ? storage.listSavedSearchesByLead(leadId)
+      : storage.listSavedSearches(userId);
+    const items = rows.map((s: any) => ({
       ...s,
       filters: (() => { try { return JSON.parse(s.filters); } catch { return {}; } })(),
     }));
@@ -1081,15 +1125,34 @@ out center tags;`;
   });
   app.post("/api/saved-searches", requireAuth, (req, res) => {
     const userId = (req as any).authUserId as number;
-    const { name, filters, emailAlerts } = req.body ?? {};
+    const {
+      name,
+      filters,
+      emailAlerts,
+      leadId,
+      emailRecipient,
+      alertType,
+      frequency,
+      instant,
+      active,
+    } = req.body ?? {};
     if (!name || typeof name !== "string") {
       return res.status(400).json({ message: "Name required" });
     }
+    if (alertType && !["listings", "snapshot"].includes(alertType)) {
+      return res.status(400).json({ message: "Invalid alertType" });
+    }
     const created = storage.createSavedSearch({
       userId,
+      leadId: leadId ?? null,
+      emailRecipient: emailRecipient ?? null,
       name,
       filters: filters ?? {},
       emailAlerts: emailAlerts !== false,
+      alertType: alertType ?? "listings",
+      frequency: frequency ?? "daily",
+      instant,
+      active,
     } as any);
     res.json(created);
   });

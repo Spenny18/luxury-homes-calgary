@@ -386,6 +386,78 @@ try {
   console.error("[migration] failed to add mls_listings columns:", err);
 }
 
+// Saved-searches table additions for unified alerts (idempotent).
+try {
+  const cols = sqlite.prepare("PRAGMA table_info(saved_searches)").all() as Array<{ name: string }>;
+  if (cols.length > 0) {
+    const existing = new Set(cols.map((c) => c.name));
+    const additions: Array<[string, string]> = [
+      ["lead_id", "INTEGER"],
+      ["email_recipient", "TEXT"],
+      ["alert_type", "TEXT NOT NULL DEFAULT 'listings'"],
+      ["frequency", "TEXT NOT NULL DEFAULT 'daily'"],
+      ["instant", "INTEGER NOT NULL DEFAULT 0"],
+      ["active", "INTEGER NOT NULL DEFAULT 1"],
+      ["last_sent_at", "TEXT"],
+      ["last_match_count", "INTEGER NOT NULL DEFAULT 0"],
+    ];
+    for (const [name, type] of additions) {
+      if (!existing.has(name)) {
+        sqlite.exec(`ALTER TABLE saved_searches ADD COLUMN ${name} ${type}`);
+        console.log(`[migration] added ${name} to saved_searches`);
+      }
+    }
+  }
+} catch (err) {
+  console.error("[migration] failed to add saved_searches columns:", err);
+}
+
+// One-time data migration: copy lead_alerts rows into saved_searches so the
+// unified table is the canonical source for the cron. Migrated rows are
+// flagged via the lead_id column. lead_alerts table is not dropped — kept
+// as a read-only audit trail.
+try {
+  const oldRows = sqlite
+    .prepare("SELECT * FROM lead_alerts WHERE active = 1")
+    .all() as Array<any>;
+  if (oldRows.length > 0) {
+    const existing = sqlite
+      .prepare("SELECT lead_id, name FROM saved_searches WHERE lead_id IS NOT NULL")
+      .all() as Array<{ lead_id: number; name: string }>;
+    const existingKey = new Set(existing.map((r) => `${r.lead_id}::${r.name}`));
+    let migrated = 0;
+    for (const r of oldRows) {
+      const key = `${r.lead_id}::${r.label}`;
+      if (existingKey.has(key)) continue;
+      sqlite
+        .prepare(
+          `INSERT INTO saved_searches (
+            user_id, lead_id, name, filters, email_alerts, alert_type, frequency,
+            instant, active, last_sent_at, last_match_count, created_at
+          ) VALUES (?, ?, ?, ?, 1, 'listings', ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          1, // Spencer's user id
+          r.lead_id,
+          r.label,
+          r.filters,
+          r.frequency ?? "daily",
+          r.instant ?? 0,
+          r.active ?? 1,
+          r.last_sent_at,
+          r.last_match_count ?? 0,
+          r.created_at ?? new Date().toISOString(),
+        );
+      migrated++;
+    }
+    if (migrated > 0) {
+      console.log(`[migration] copied ${migrated} lead_alerts rows into saved_searches`);
+    }
+  }
+} catch (err) {
+  console.error("[migration] lead_alerts -> saved_searches copy failed:", err);
+}
+
 // Neighbourhoods table additions (idempotent).
 try {
   const cols = sqlite.prepare("PRAGMA table_info(neighbourhoods)").all() as Array<{ name: string }>;
@@ -1224,6 +1296,36 @@ export class DatabaseStorage implements IStorage {
       return now.getTime() - new Date(a.lastSentAt).getTime() >= lim;
     });
   }
+  // Unified: returns saved_searches rows that are due to fire — emailAlerts=on,
+  // active=on, and lastSentAt is older than the frequency cadence (or null).
+  // Personal searches (leadId null) are included so the cron can also email
+  // Spencer.
+  dueSavedSearches(now = new Date()): SavedSearch[] {
+    const all = db.select().from(savedSearches).all();
+    const cutoffMs: Record<string, number> = {
+      daily: 24 * 60 * 60 * 1000,
+      weekly: 7 * 24 * 60 * 60 * 1000,
+      monthly: 30 * 24 * 60 * 60 * 1000,
+    };
+    return all.filter((s: any) => {
+      if (!s.emailAlerts) return false;
+      if (s.active === false) return false;
+      if (s.instant) return false;
+      const freq = s.frequency || "daily";
+      const lim = cutoffMs[freq];
+      if (!lim) return false;
+      if (!s.lastSentAt) return true;
+      return now.getTime() - new Date(s.lastSentAt).getTime() >= lim;
+    });
+  }
+  listSavedSearchesByLead(leadId: number): SavedSearch[] {
+    return db
+      .select()
+      .from(savedSearches)
+      .where(eq(savedSearches.leadId, leadId))
+      .orderBy(desc(savedSearches.createdAt))
+      .all();
+  }
   // ---- MLS price + status change history --------------------------------
   recordMlsPriceChange(data: InsertMlsPriceHistory): void {
     db.insert(mlsPriceHistory).values(data).run();
@@ -1419,23 +1521,28 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(savedSearches.createdAt))
       .all();
   }
-  createSavedSearch(data: InsertSavedSearch & { userId: number }): SavedSearch {
-    return db
-      .insert(savedSearches)
-      .values({
-        userId: data.userId,
-        name: data.name,
-        filters: typeof data.filters === "string" ? data.filters : JSON.stringify(data.filters ?? {}),
-        emailAlerts: data.emailAlerts ?? true,
-      })
-      .returning()
-      .get();
+  createSavedSearch(data: any): SavedSearch {
+    const row: any = {
+      userId: data.userId,
+      leadId: data.leadId ?? null,
+      emailRecipient: data.emailRecipient ?? null,
+      name: data.name,
+      filters: typeof data.filters === "string" ? data.filters : JSON.stringify(data.filters ?? {}),
+      emailAlerts: data.emailAlerts ?? true,
+      alertType: data.alertType ?? "listings",
+      frequency: data.frequency ?? "daily",
+      instant: data.instant === true || data.frequency === "instant",
+      active: data.active !== false,
+    };
+    return db.insert(savedSearches).values(row).returning().get();
   }
-  updateSavedSearch(id: number, patch: Partial<{ name: string; filters: any; emailAlerts: boolean }>): SavedSearch | undefined {
+  updateSavedSearch(id: number, patch: any): SavedSearch | undefined {
     const update: any = { ...patch };
     if (update.filters && typeof update.filters !== "string") {
       update.filters = JSON.stringify(update.filters);
     }
+    if (update.frequency === "instant") update.instant = true;
+    if (update.frequency && update.frequency !== "instant") update.instant = false;
     return db
       .update(savedSearches)
       .set(update)
