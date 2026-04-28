@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
@@ -38,6 +38,20 @@ interface SavedSearch {
   matchCount: number;
   lastRunAt: string | null;
   createdAt: string;
+  leadId?: number | null;
+  emailRecipient?: string | null;
+  alertType?: "listings" | "snapshot";
+  frequency?: "instant" | "daily" | "weekly" | "monthly";
+  lastSentAt?: string | null;
+  lastMatchCount?: number;
+  active?: boolean;
+}
+
+interface LeadRow {
+  id: number;
+  name: string;
+  email: string;
+  status: string;
 }
 
 const EMPTY_FILTERS: SavedSearchFilters = {
@@ -57,34 +71,84 @@ export default function AdminSavedSearchesPage() {
   const { data: searches = [], isLoading } = useQuery<SavedSearch[]>({
     queryKey: ["/api/saved-searches"],
   });
+  const { data: leads = [] } = useQuery<LeadRow[]>({ queryKey: ["/api/leads"] });
+
+  const leadById = useMemo(() => {
+    const m = new Map<number, LeadRow>();
+    for (const l of leads) m.set(l.id, l);
+    return m;
+  }, [leads]);
 
   const [editing, setEditing] = useState<SavedSearch | null>(null);
   const [creating, setCreating] = useState(false);
-  const [draft, setDraft] = useState<{ name: string; emailAlerts: boolean; filters: SavedSearchFilters }>({
+  const [draft, setDraft] = useState<{
+    name: string;
+    emailAlerts: boolean;
+    filters: SavedSearchFilters;
+    leadId: number | null;
+    emailRecipient: string;
+    alertType: "listings" | "snapshot";
+    frequency: "instant" | "daily" | "weekly" | "monthly";
+  }>({
     name: "",
     emailAlerts: true,
     filters: EMPTY_FILTERS,
+    leadId: null,
+    emailRecipient: "",
+    alertType: "listings",
+    frequency: "daily",
   });
+  const [leadSearch, setLeadSearch] = useState("");
+  const [filterByLead, setFilterByLead] = useState<number | null>(null);
 
-  function openCreate() {
+  function openCreate(leadIdHint?: number | null) {
     setEditing(null);
-    setDraft({ name: "", emailAlerts: true, filters: { ...EMPTY_FILTERS } });
+    setDraft({
+      name: "",
+      emailAlerts: true,
+      filters: { ...EMPTY_FILTERS },
+      leadId: leadIdHint ?? null,
+      emailRecipient: "",
+      alertType: "listings",
+      frequency: "daily",
+    });
     setCreating(true);
   }
 
   function openEdit(s: SavedSearch) {
     setEditing(s);
-    setDraft({ name: s.name, emailAlerts: s.emailAlerts, filters: { ...EMPTY_FILTERS, ...s.filters } });
+    setDraft({
+      name: s.name,
+      emailAlerts: s.emailAlerts,
+      filters: { ...EMPTY_FILTERS, ...s.filters },
+      leadId: s.leadId ?? null,
+      emailRecipient: s.emailRecipient ?? "",
+      alertType: (s.alertType as any) ?? "listings",
+      frequency: (s.frequency as any) ?? "daily",
+    });
     setCreating(true);
   }
 
+  const filteredSearches = filterByLead
+    ? searches.filter((s) => s.leadId === filterByLead)
+    : searches;
+
   const saveMutation = useMutation({
     mutationFn: async () => {
+      const payload = {
+        name: draft.name,
+        filters: draft.filters,
+        emailAlerts: draft.emailAlerts,
+        leadId: draft.leadId,
+        emailRecipient: draft.emailRecipient || null,
+        alertType: draft.alertType,
+        frequency: draft.frequency,
+      };
       if (editing) {
-        const res = await apiRequest("PATCH", `/api/saved-searches/${editing.id}`, draft);
+        const res = await apiRequest("PATCH", `/api/saved-searches/${editing.id}`, payload);
         return res.json();
       }
-      const res = await apiRequest("POST", "/api/saved-searches", draft);
+      const res = await apiRequest("POST", "/api/saved-searches", payload);
       return res.json();
     },
     onSuccess: () => {
@@ -131,30 +195,68 @@ export default function AdminSavedSearchesPage() {
               matches land.
             </p>
           </div>
-          <Button onClick={openCreate} className="rounded-sm font-display tracking-[0.14em] text-[11px] h-10">
+          <Button onClick={() => openCreate()} className="rounded-sm font-display tracking-[0.14em] text-[11px] h-10">
             <Plus className="w-3.5 h-3.5 mr-1.5" /> NEW SEARCH
           </Button>
         </div>
 
+        {/* Filter by lead */}
+        {leads.length > 0 && (
+          <div className="mb-5 flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] font-display tracking-[0.18em] text-muted-foreground">
+              SHOW:
+            </span>
+            <button
+              onClick={() => setFilterByLead(null)}
+              className={`px-2.5 py-1 rounded-sm text-[11px] font-display tracking-[0.14em] border ${
+                filterByLead === null
+                  ? "bg-foreground text-background border-foreground"
+                  : "bg-background border-border hover:bg-secondary/40"
+              }`}
+            >
+              ALL ({searches.length})
+            </button>
+            {Array.from(new Set(searches.map((s) => s.leadId).filter((x): x is number => !!x))).map((leadId) => {
+              const lead = leadById.get(leadId);
+              const count = searches.filter((s) => s.leadId === leadId).length;
+              return (
+                <button
+                  key={leadId}
+                  onClick={() => setFilterByLead(leadId)}
+                  className={`px-2.5 py-1 rounded-sm text-[11px] border ${
+                    filterByLead === leadId
+                      ? "bg-foreground text-background border-foreground"
+                      : "bg-background border-border hover:bg-secondary/40"
+                  }`}
+                >
+                  {lead?.name ?? `Lead #${leadId}`} ({count})
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {isLoading ? (
           <div className="text-sm text-muted-foreground py-12 text-center">Loading saved searches…</div>
-        ) : searches.length === 0 ? (
+        ) : filteredSearches.length === 0 ? (
           <Card>
             <CardContent className="p-10 text-center">
               <Search className="w-10 h-10 mx-auto mb-3 text-muted-foreground" strokeWidth={1.4} />
               <div className="font-serif text-xl">No saved searches yet</div>
               <div className="text-sm text-muted-foreground mt-2 max-w-sm mx-auto">
-                Build a buyer brief once — name it, set the filters, and we'll surface new matches as the MLS
-                refreshes hourly.
+                Build a buyer brief once — name it, link it to a lead, set the filters, and we'll
+                email the lead as new matches hit the MLS.
               </div>
-              <Button onClick={openCreate} className="mt-5 rounded-sm font-display tracking-[0.14em] text-[11px]">
+              <Button onClick={() => openCreate()} className="mt-5 rounded-sm font-display tracking-[0.14em] text-[11px]">
                 <Plus className="w-3.5 h-3.5 mr-1.5" /> CREATE FIRST SEARCH
               </Button>
             </CardContent>
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {searches.map((s) => (
+            {filteredSearches.map((s) => {
+              const lead = s.leadId ? leadById.get(s.leadId) : null;
+              return (
               <Card key={s.id} className="group">
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between gap-3">
@@ -162,10 +264,28 @@ export default function AdminSavedSearchesPage() {
                       <div className="font-serif text-lg truncate" style={{ letterSpacing: "-0.01em" }}>
                         {s.name}
                       </div>
-                      <div className="text-xs text-muted-foreground mt-1 flex items-center gap-2 flex-wrap">
-                        <span>{s.matchCount} matches</span>
-                        <span>·</span>
-                        <span>last run {timeAgoShort(s.lastRunAt)}</span>
+                      {lead ? (
+                        <div className="text-[11px] font-display tracking-[0.14em] text-foreground mt-1">
+                          → {lead.name.toUpperCase()} · {lead.email}
+                        </div>
+                      ) : s.emailRecipient ? (
+                        <div className="text-[11px] font-display tracking-[0.14em] text-foreground mt-1">
+                          → {s.emailRecipient}
+                        </div>
+                      ) : (
+                        <div className="text-[11px] font-display tracking-[0.14em] text-muted-foreground italic mt-1">
+                          BROWSING-ONLY · NO EMAIL
+                        </div>
+                      )}
+                      <div className="text-xs text-muted-foreground mt-1.5 flex items-center gap-2 flex-wrap">
+                        <span className="font-display tracking-[0.12em] uppercase">
+                          {(s.alertType ?? "listings") === "snapshot" ? "SNAPSHOT" : "PROPERTY"}
+                        </span>
+                        <span className="font-display tracking-[0.12em] uppercase">
+                          · {s.frequency ?? "daily"}
+                        </span>
+                        <span>· {s.lastMatchCount ?? s.matchCount ?? 0} matches</span>
+                        {s.lastSentAt && <span>· last sent {timeAgoShort(s.lastSentAt)}</span>}
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
@@ -232,7 +352,8 @@ export default function AdminSavedSearchesPage() {
                   </div>
                 </CardContent>
               </Card>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -245,7 +366,7 @@ export default function AdminSavedSearchesPage() {
               {editing ? "Edit saved search" : "New saved search"}
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
             <div>
               <Label className="eyebrow text-muted-foreground">Name</Label>
               <Input
@@ -254,6 +375,120 @@ export default function AdminSavedSearchesPage() {
                 placeholder="Aspen Woods estates · 4+ bed"
                 className="mt-1.5 rounded-sm"
               />
+            </div>
+
+            {/* Lead picker — required when emailAlerts is on. */}
+            <div>
+              <Label className="eyebrow text-muted-foreground">Send alerts to (lead)</Label>
+              <Input
+                value={leadSearch}
+                onChange={(e) => setLeadSearch(e.target.value)}
+                placeholder="Search leads by name or email…"
+                className="mt-1.5 rounded-sm"
+              />
+              <div className="mt-2 max-h-[180px] overflow-y-auto border border-border rounded-sm divide-y divide-border">
+                <button
+                  type="button"
+                  onClick={() => setDraft({ ...draft, leadId: null })}
+                  className={`w-full text-left px-3 py-2 text-[12px] ${
+                    draft.leadId === null ? "bg-secondary/60" : "hover:bg-secondary/40"
+                  }`}
+                >
+                  <span className="italic text-muted-foreground">— No lead (browsing only) —</span>
+                </button>
+                {leads
+                  .filter((l) =>
+                    !leadSearch ||
+                    `${l.name} ${l.email}`.toLowerCase().includes(leadSearch.toLowerCase()),
+                  )
+                  .slice(0, 50)
+                  .map((l) => {
+                    const checked = draft.leadId === l.id;
+                    return (
+                      <button
+                        key={l.id}
+                        type="button"
+                        onClick={() => setDraft({ ...draft, leadId: l.id })}
+                        className={`w-full text-left px-3 py-2 text-[12px] ${
+                          checked ? "bg-foreground/5" : "hover:bg-secondary/40"
+                        }`}
+                      >
+                        <div className="font-medium truncate">{l.name}</div>
+                        <div className="text-[11px] text-muted-foreground truncate">
+                          {l.email} · {l.status}
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1.5">
+                Emails will go to the selected lead's address. If no lead is picked, this saved
+                search is browsing-only and won't email anyone.
+              </p>
+            </div>
+
+            {/* Optional override email */}
+            <div>
+              <Label className="eyebrow text-muted-foreground">
+                Override recipient email (optional)
+              </Label>
+              <Input
+                type="email"
+                value={draft.emailRecipient}
+                onChange={(e) => setDraft({ ...draft, emailRecipient: e.target.value })}
+                placeholder="Leave blank to use the lead's email"
+                className="mt-1.5 rounded-sm"
+              />
+            </div>
+
+            {/* Alert type picker */}
+            <div>
+              <Label className="eyebrow text-muted-foreground">Alert type</Label>
+              <div className="grid grid-cols-2 gap-2 mt-1.5">
+                <button
+                  type="button"
+                  onClick={() => setDraft({ ...draft, alertType: "listings" })}
+                  className={`px-3 py-2 rounded-sm border text-[11px] font-display tracking-[0.16em] transition-colors ${
+                    draft.alertType === "listings"
+                      ? "bg-foreground text-background border-foreground"
+                      : "bg-background border-border hover:bg-secondary/40"
+                  }`}
+                >
+                  PROPERTY ALERTS
+                  <div className="font-sans normal-case tracking-normal text-[10px] mt-0.5 opacity-80">
+                    New matches + reductions
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDraft({ ...draft, alertType: "snapshot" })}
+                  className={`px-3 py-2 rounded-sm border text-[11px] font-display tracking-[0.16em] transition-colors ${
+                    draft.alertType === "snapshot"
+                      ? "bg-foreground text-background border-foreground"
+                      : "bg-background border-border hover:bg-secondary/40"
+                  }`}
+                >
+                  MARKET SNAPSHOT
+                  <div className="font-sans normal-case tracking-normal text-[10px] mt-0.5 opacity-80">
+                    Stats only
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Frequency */}
+            <div>
+              <Label className="eyebrow text-muted-foreground">Frequency</Label>
+              <select
+                value={draft.frequency}
+                onChange={(e) => setDraft({ ...draft, frequency: e.target.value as any })}
+                className="mt-1.5 w-full h-10 rounded-sm border border-border bg-background px-3 text-sm"
+              >
+                <option value="instant">Instant — every match emails immediately</option>
+                <option value="daily">Daily digest</option>
+                <option value="weekly">Weekly digest</option>
+                <option value="monthly">Monthly digest</option>
+              </select>
             </div>
 
             <div className="grid grid-cols-2 gap-3">

@@ -47,7 +47,9 @@ export async function runLeadAlertCycle(): Promise<{
   for (const alert of due as any[]) {
     scanned++;
     try {
-      // Determine recipient: explicit override -> linked lead -> Spencer fallback.
+      // Determine recipient: explicit override -> linked lead. NO fallback
+      // to Spencer's inbox — saved searches without a recipient are
+      // browsing-only and never email anyone.
       let recipient: string | null = alert.emailRecipient || null;
       let recipientName = "there";
       if (!recipient && alert.leadId) {
@@ -57,14 +59,14 @@ export async function runLeadAlertCycle(): Promise<{
           recipientName = lead.name || "there";
         }
       }
-      if (!recipient && fallbackTo) {
-        recipient = fallbackTo;
-        recipientName = "Spencer";
-      }
       if (!recipient) {
         skipped++;
         continue;
       }
+      // Reference fallbackTo for backwards-compat references (no longer used
+      // as actual fallback). Keeping the variable to avoid breaking deploys
+      // mid-cycle.
+      void fallbackTo;
 
       const filters = (() => {
         try {
