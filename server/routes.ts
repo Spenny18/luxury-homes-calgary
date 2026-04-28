@@ -562,10 +562,19 @@ export async function registerRoutes(
   app.get("/api/public/condos/:slug", (req, res) => {
     const c = storage.getCondoBuildingBySlug(req.params.slug);
     if (!c) return res.status(404).json({ message: "Condo building not found" });
-    // Active listings AT this building's address (number + street prefix match)
-    // helps surface unit listings without exact-match precision.
-    const addressKey = c.address.split(",")[0].trim();
-    const listings = storage.listingsAtAddress(addressKey, 30).map((l) => ({
+    // Active listings IN this building. We use GPS proximity (75m default)
+    // because Pillar 9 stores unit-prefixed addresses ("#1808 1188 3 Street SE")
+    // and abbreviated forms ("1188 3 St SE") that don't substring-match our
+    // seed addresses cleanly. Coordinates do.
+    let raw = storage.listingsAtBuilding(c.lat, c.lng, 75, 60);
+    // Fall back to address substring if GPS yields nothing — covers the case
+    // where a listing's coordinates are missing but its address has the
+    // building's street number.
+    if (raw.length === 0) {
+      const addressKey = c.address.split(",")[0].trim();
+      raw = storage.listingsAtAddress(addressKey, 60);
+    }
+    const listings = raw.map((l) => ({
       id: l.id,
       mlsNumber: l.mlsNumber,
       fullAddress: l.fullAddress,

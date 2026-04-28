@@ -1038,6 +1038,59 @@ export class DatabaseStorage implements IStorage {
       .limit(limit)
       .all();
   }
+  // Active MLS listings within `radiusMeters` of a building's coordinates.
+  // More robust than address-string matching because Pillar 9 stores unit-
+  // prefixed addresses ("#1808 1188 3 Street SE") and abbreviated forms
+  // ("1188 3 St SE") that don't share clean substrings with our seed addresses.
+  // Coordinates always match — every MLS listing in a tower will sit within
+  // ~30m of the same point on the map.
+  listingsAtBuilding(
+    lat: number,
+    lng: number,
+    radiusMeters = 75,
+    limit = 30,
+  ): MlsListing[] {
+    // Tight bounding box pre-filter so we don't pull every active listing.
+    // 1 deg lat ~ 111,000m. 1 deg lng at 51N ~ 70,000m.
+    const dLat = radiusMeters / 111_000;
+    const dLng = radiusMeters / 70_000;
+    const candidates = db
+      .select()
+      .from(mlsListings)
+      .where(
+        and(
+          eq(mlsListings.status, "Active"),
+          gte(mlsListings.lat, lat - dLat),
+          lte(mlsListings.lat, lat + dLat),
+          gte(mlsListings.lng, lng - dLng),
+          lte(mlsListings.lng, lng + dLng),
+        )!,
+      )
+      .all();
+    // Refine with full haversine within the bbox to enforce circular radius.
+    const haversine = (
+      a: { lat: number; lng: number },
+      b: { lat: number; lng: number },
+    ) => {
+      const R = 6371000;
+      const toRad = (d: number) => (d * Math.PI) / 180;
+      const dlat = toRad(b.lat - a.lat);
+      const dlng = toRad(b.lng - a.lng);
+      const sa =
+        Math.sin(dlat / 2) ** 2 +
+        Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dlng / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(sa));
+    };
+    return candidates
+      .filter((l) => l.lat != null && l.lng != null)
+      .filter(
+        (l) =>
+          haversine({ lat, lng }, { lat: l.lat as number, lng: l.lng as number }) <=
+          radiusMeters,
+      )
+      .sort((a, b) => b.listPrice - a.listPrice)
+      .slice(0, limit);
+  }
   // ---- Testimonials -------------------------------------------------------
   listTestimonials(): Testimonial[] {
     return db.select().from(testimonials).orderBy(asc(testimonials.sortOrder)).all();
