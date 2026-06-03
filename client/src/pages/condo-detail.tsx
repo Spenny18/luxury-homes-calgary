@@ -1,13 +1,14 @@
-import { Link, useRoute } from "wouter";
-import { useQuery } from "@tanstack/react-query";
-import { MapContainer, TileLayer, Marker } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import { lazy, Suspense } from "react";
+import { Link } from "@/lib/router-compat";
+import { useData } from "vike-react/useData";
 import { ChevronLeft, MapPin, ArrowRight, Building2, Layers, Calendar } from "lucide-react";
 import { PublicLayout } from "@/components/public-layout";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ClientOnly } from "@/components/client-only";
 import { formatPrice, formatSqft } from "@/lib/format";
 import { apiUrl } from "@/lib/queryClient";
+
+// Lazy-loaded Leaflet wrapper — keeps the map out of the SSR bundle.
+const CondoDetailMap = lazy(() => import("@/components/condo-detail-map"));
 
 interface CondoDetail {
   slug: string;
@@ -42,34 +43,8 @@ interface CondoDetail {
   }>;
 }
 
-const propertyIcon = L.divIcon({
-  className: "rivers-condo-pin",
-  html: `<div style="width:14px;height:14px;border-radius:50%;background:#23412d;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.25)"></div>`,
-  iconSize: [20, 20],
-  iconAnchor: [10, 10],
-});
-
 export default function CondoDetailPage() {
-  const [, params] = useRoute<{ slug: string }>("/condos/:slug");
-  const slug = params?.slug;
-
-  const { data, isLoading } = useQuery<CondoDetail>({
-    queryKey: ["/api/public/condos", slug],
-    enabled: !!slug,
-  });
-
-  if (isLoading) {
-    return (
-      <PublicLayout>
-        <Skeleton className="h-[60vh] w-full" />
-        <div className="max-w-[1200px] mx-auto px-6 py-12 space-y-4">
-          <Skeleton className="h-12 w-2/3" />
-          <Skeleton className="h-6 w-1/2" />
-          <Skeleton className="h-40 w-full" />
-        </div>
-      </PublicLayout>
-    );
-  }
+  const data = useData<CondoDetail | null>();
 
   if (!data) {
     return (
@@ -282,18 +257,11 @@ export default function CondoDetailPage() {
           {data.address}
         </h2>
         <div className="rounded-sm overflow-hidden border border-border h-[460px]">
-          <MapContainer
-            center={[data.lat, data.lng]}
-            zoom={16}
-            scrollWheelZoom={false}
-            style={{ height: "100%", width: "100%" }}
-          >
-            <TileLayer
-              attribution="&copy; OpenStreetMap, &copy; CARTO"
-              url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-            />
-            <Marker position={[data.lat, data.lng]} icon={propertyIcon} />
-          </MapContainer>
+          <ClientOnly>
+            <Suspense fallback={null}>
+              <CondoDetailMap lat={data.lat} lng={data.lng} />
+            </Suspense>
+          </ClientOnly>
         </div>
         <div className="mt-4 flex items-center gap-3 flex-wrap">
           <a

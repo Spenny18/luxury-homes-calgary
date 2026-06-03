@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
-import { Link, useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { Link, useLocation } from "@/lib/router-compat";
+import { useData } from "vike-react/useData";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -725,35 +725,27 @@ function ContactCTA() {
   );
 }
 
+interface HomePageData {
+  featured: PublicMlsListing[];
+  neighbourhoods: PublicNeighbourhood[];
+  blog: PublicBlogPost[];
+  testimonials: PublicTestimonial[];
+  stats: PublicStats | null;
+}
+
 export default function HomePage() {
-  const featured = useQuery<PublicMlsListing[]>({
-    queryKey: ["/api/public/mls/featured"],
-  });
-  const neighbourhoods = useQuery<PublicNeighbourhood[]>({
-    queryKey: ["/api/public/neighbourhoods"],
-  });
-  const blog = useQuery<PublicBlogPost[]>({
-    queryKey: ["/api/public/blog"],
-  });
-  const testimonials = useQuery<PublicTestimonial[]>({
-    queryKey: ["/api/public/testimonials"],
-  });
-  const stats = useQuery<PublicStats>({
-    queryKey: ["/api/public/stats"],
-  });
+  const { featured, neighbourhoods, blog, testimonials, stats } =
+    useData<HomePageData>();
 
   return (
     <PublicLayout transparentHeader>
       <HeroSection />
-      <StatsBand stats={stats.data} />
-      <FeaturedListings
-        listings={featured.data ?? []}
-        loading={featured.isLoading}
-      />
-      <NeighbourhoodPicker neighbourhoods={neighbourhoods.data ?? []} />
+      <StatsBand stats={stats ?? undefined} />
+      <FeaturedListings listings={featured ?? []} loading={false} />
+      <NeighbourhoodPicker neighbourhoods={neighbourhoods ?? []} />
       <WhyUs />
-      <BlogTeaser posts={blog.data ?? []} />
-      <Testimonials items={testimonials.data ?? []} />
+      <BlogTeaser posts={blog ?? []} />
+      <Testimonials items={testimonials ?? []} />
       <ContactCTA />
     </PublicLayout>
   );

@@ -1,7 +1,6 @@
-import { Link } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { Link } from "@/lib/router-compat";
+import { useData } from "vike-react/useData";
 import { PublicLayout } from "@/components/public-layout";
-import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowRight, Building2 } from "lucide-react";
 
 interface CondoBuilding {
@@ -27,9 +26,8 @@ const NEIGHBOURHOOD_GROUPS = [
 ];
 
 export default function CondosIndexPage() {
-  const { data: buildings = [], isLoading } = useQuery<CondoBuilding[]>({
-    queryKey: ["/api/public/condos"],
-  });
+  const buildings = useData<CondoBuilding[]>() ?? [];
+  const isLoading = false;
 
   const grouped = buildings.reduce<Record<string, CondoBuilding[]>>((acc, b) => {
     const key = b.neighbourhood;

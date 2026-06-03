@@ -1,13 +1,19 @@
-import { useRoute, Link } from "wouter";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { useState } from "react";
+import { Link } from "@/lib/router-compat";
+import { useMutation } from "@tanstack/react-query";
+import { useData } from "vike-react/useData";
+import { useState, lazy, Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Logo } from "@/components/logo";
-import { NeighbourhoodMap } from "@/components/neighbourhood-map";
+import { ClientOnly } from "@/components/client-only";
+
+// Leaflet-using component — lazy-loaded so SSR doesn't try to bundle it.
+const NeighbourhoodMap = lazy(() =>
+  import("@/components/neighbourhood-map").then((m) => ({ default: m.NeighbourhoodMap })),
+);
 import {
   Bed,
   Bath,
@@ -29,18 +35,10 @@ import type { PublicListing } from "@/lib/types";
 import NotFound from "./not-found";
 
 export default function ListingPublicPage() {
-  const [, params] = useRoute("/p/:slug");
-  const slug = params?.slug ?? "";
+  const listing = useData<PublicListing | null>();
+  const isLoading = false;
+  const error: any = null;
   const { toast } = useToast();
-
-  const { data: listing, isLoading, error } = useQuery<PublicListing>({
-    queryKey: ["/api/listings/by-slug", slug],
-    queryFn: async () => {
-      const res = await apiRequest("GET", `/api/listings/by-slug/${slug}`);
-      return res.json();
-    },
-    enabled: !!slug,
-  });
 
   // Inquiry form state
   const [name, setName] = useState("");
@@ -248,12 +246,16 @@ export default function ListingPublicPage() {
             <p className="text-sm text-muted-foreground mb-5 max-w-xl mt-3">
               {neighbourhoodBlurb(listing.neighbourhood)}
             </p>
-            <NeighbourhoodMap
-              amenities={amenities}
-              centerLat={listing.lat}
-              centerLng={listing.lng}
-              propertyAddress={listing.address}
-            />
+            <ClientOnly>
+              <Suspense fallback={null}>
+                <NeighbourhoodMap
+                  amenities={amenities}
+                  centerLat={listing.lat}
+                  centerLng={listing.lng}
+                  propertyAddress={listing.address}
+                />
+              </Suspense>
+            </ClientOnly>
           </div>
 
           {/* CTA strip */}

@@ -1,11 +1,12 @@
 import "dotenv/config";
-import express, { Response, NextFunction } from 'express';
-import type { Request } from 'express';
+import express, { Response, NextFunction } from "express";
+import type { Request } from "express";
 import { registerRoutes } from "./routes";
-import { serveStatic } from "./static";
+import { renderPage } from "vike/server";
 import { createServer } from "node:http";
 import { startSyncCron } from "./rets-sync";
 import { startLeadAlertCron } from "./lead-alert-cron";
+import path from "node:path";
 
 const app = express();
 const httpServer = createServer(app);
@@ -90,20 +91,40 @@ app.use((req, res, next) => {
     return res.status(status).json({ message });
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
+  // Mount Vite (dev) or serve the prerendered client assets (prod). Vike's
+  // renderPage handles the actual page rendering in both modes — in dev it
+  // streams freshly transformed HTML, in prod it either serves a prerendered
+  // HTML file or SSR-renders per request.
   if (process.env.NODE_ENV === "production") {
-    serveStatic(app);
+    // Serve hashed client assets (the JS/CSS chunks Vike's build emits) and
+    // any prerendered HTML files. The catch-all below falls through to Vike
+    // for routes that aren't a static file (e.g. SSR'd /, /p/:slug).
+    const clientDist = path.resolve(__dirname, "client");
+    app.use(express.static(clientDist, { index: false }));
   } else {
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
+  // Vike renders the page (SSG'd, SSR'd, or CSR-shell — depending on the
+  // matched route's +config). Everything not matched by an /api/* route or a
+  // static asset above lands here.
+  app.use(async (req, res, next) => {
+    try {
+      const pageContext = await renderPage({
+        urlOriginal: req.originalUrl,
+        headersOriginal: req.headers as Record<string, string>,
+      });
+      const { httpResponse } = pageContext;
+      if (!httpResponse) return next();
+      const { body, statusCode, headers } = httpResponse;
+      headers.forEach(([name, value]) => res.setHeader(name, value));
+      res.status(statusCode).send(body);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   const port = parseInt(process.env.PORT || "5000", 10);
   httpServer.listen(
     {

@@ -1,8 +1,7 @@
-import { Link } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { Link } from "@/lib/router-compat";
+import { useData } from "vike-react/useData";
 import { ArrowRight, MapPin } from "lucide-react";
 import { PublicLayout } from "@/components/public-layout";
-import { Skeleton } from "@/components/ui/skeleton";
 import { formatPriceCompact } from "@/lib/format";
 import type { PublicNeighbourhood } from "@/lib/mls-types";
 
@@ -10,9 +9,8 @@ const HERO_IMAGE =
   "https://images.unsplash.com/photo-1480714378408-67cf0d13bc1b?w=2400&h=1200&fit=crop";
 
 export default function NeighbourhoodsIndexPage() {
-  const { data, isLoading } = useQuery<PublicNeighbourhood[]>({
-    queryKey: ["/api/public/neighbourhoods"],
-  });
+  const data = useData<PublicNeighbourhood[]>();
+  const isLoading = false;
 
   return (
     <PublicLayout>

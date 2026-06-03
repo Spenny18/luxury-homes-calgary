@@ -1,8 +1,7 @@
-import { Link, useRoute } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { Link } from "@/lib/router-compat";
+import { useData } from "vike-react/useData";
 import { ChevronLeft, Clock, Phone, Mail } from "lucide-react";
 import { PublicLayout } from "@/components/public-layout";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import {
   SPENCER_PHONE,
@@ -107,31 +106,13 @@ function inline(text: string): React.ReactNode {
   });
 }
 
+interface BlogDetailData {
+  post: PublicBlogPost | null;
+  allPosts: PublicBlogPost[];
+}
+
 export default function BlogDetailPage() {
-  const [, params] = useRoute<{ slug: string }>("/blog/:slug");
-  const slug = params?.slug;
-
-  const { data: post, isLoading } = useQuery<PublicBlogPost>({
-    queryKey: ["/api/public/blog", slug],
-    enabled: !!slug,
-  });
-
-  const { data: allPosts } = useQuery<PublicBlogPost[]>({
-    queryKey: ["/api/public/blog"],
-    enabled: !!post,
-  });
-
-  if (isLoading) {
-    return (
-      <PublicLayout>
-        <div className="max-w-[800px] mx-auto px-6 py-16 space-y-4">
-          <Skeleton className="h-6 w-32" />
-          <Skeleton className="h-12 w-full" />
-          <Skeleton className="aspect-[16/9] w-full" />
-        </div>
-      </PublicLayout>
-    );
-  }
+  const { post, allPosts } = useData<BlogDetailData>();
 
   if (!post) {
     return (

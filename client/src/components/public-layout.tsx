@@ -1,5 +1,5 @@
 import { ReactNode, useState, useEffect } from "react";
-import { Link, useLocation } from "wouter";
+import { Link, useLocation } from "@/lib/router-compat";
 import { Logo } from "@/components/logo";
 import { useTheme } from "@/components/theme-provider";
 import { Menu, X, Sun, Moon, Phone } from "lucide-react";

@@ -1,8 +1,7 @@
-import { Link } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { Link } from "@/lib/router-compat";
+import { useData } from "vike-react/useData";
 import { ArrowRight, Clock } from "lucide-react";
 import { PublicLayout } from "@/components/public-layout";
-import { Skeleton } from "@/components/ui/skeleton";
 import type { PublicBlogPost } from "@/lib/mls-types";
 
 function fmtDate(iso: string) {
@@ -15,11 +14,9 @@ function fmtDate(iso: string) {
 }
 
 export default function BlogIndexPage() {
-  const { data, isLoading } = useQuery<PublicBlogPost[]>({
-    queryKey: ["/api/public/blog"],
-  });
-
+  const data = useData<PublicBlogPost[]>();
   const posts = data ?? [];
+  const isLoading = false;
   const [feature, ...rest] = posts;
 
   return (

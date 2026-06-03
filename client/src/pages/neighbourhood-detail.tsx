@@ -1,39 +1,24 @@
-import { Link, useRoute } from "wouter";
-import { useQuery } from "@tanstack/react-query";
-import { MapContainer, TileLayer, CircleMarker, Tooltip } from "react-leaflet";
-import "leaflet/dist/leaflet.css";
+import { lazy, Suspense } from "react";
+import { Link } from "@/lib/router-compat";
+import { useData } from "vike-react/useData";
 import { ArrowRight, ChevronLeft, MapPin, Home as HomeIcon } from "lucide-react";
 import { PublicLayout } from "@/components/public-layout";
 import { ListingCard } from "@/components/listing-card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { ClientOnly } from "@/components/client-only";
 import { formatPriceCompact } from "@/lib/format";
 import {
   parseJsonArray,
   type PublicNeighbourhoodDetail,
 } from "@/lib/mls-types";
 
+// Lazy-load the Leaflet map — it isn't SSR-safe and isn't SEO content.
+const NeighbourhoodDetailMap = lazy(
+  () => import("@/components/neighbourhood-detail-map"),
+);
+
 export default function NeighbourhoodDetailPage() {
-  const [, params] = useRoute<{ slug: string }>("/neighbourhoods/:slug");
-  const slug = params?.slug;
-
-  const { data, isLoading } = useQuery<PublicNeighbourhoodDetail>({
-    queryKey: ["/api/public/neighbourhoods", slug],
-    enabled: !!slug,
-  });
-
-  if (isLoading) {
-    return (
-      <PublicLayout>
-        <Skeleton className="h-[60vh] w-full" />
-        <div className="max-w-[1200px] mx-auto px-6 py-12 space-y-4">
-          <Skeleton className="h-12 w-2/3" />
-          <Skeleton className="h-6 w-1/2" />
-          <Skeleton className="h-40 w-full" />
-        </div>
-      </PublicLayout>
-    );
-  }
+  const data = useData<PublicNeighbourhoodDetail | null>();
 
   if (!data) {
     return (
@@ -152,66 +137,16 @@ export default function NeighbourhoodDetailPage() {
           className="mt-6 aspect-[16/9] rounded-sm overflow-hidden border border-border bg-secondary"
           data-testid="neighbourhood-map"
         >
-          <MapContainer
-            center={[data.centerLat, data.centerLng]}
-            zoom={14}
-            scrollWheelZoom={false}
-            style={{ height: "100%", width: "100%" }}
-          >
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            <CircleMarker
-              center={[data.centerLat, data.centerLng]}
-              radius={16}
-              pathOptions={{
-                color: "#fff",
-                weight: 3,
-                fillColor: "#000",
-                fillOpacity: 1,
-              }}
-            >
-              <Tooltip permanent direction="top" offset={[0, -10]} opacity={1}>
-                <div
-                  style={{
-                    fontFamily: "Manrope, sans-serif",
-                    fontWeight: 600,
-                    fontSize: 12,
-                  }}
-                >
-                  {data.name}
-                </div>
-              </Tooltip>
-            </CircleMarker>
-            {listings
-              .filter((l) => l.lat != null && l.lng != null)
-              .slice(0, 24)
-              .map((l) => (
-                <CircleMarker
-                  key={l.id}
-                  center={[l.lat as number, l.lng as number]}
-                  radius={6}
-                  pathOptions={{
-                    color: "#fff",
-                    weight: 2,
-                    fillColor: "#666",
-                    fillOpacity: 1,
-                  }}
-                >
-                  <Tooltip>
-                    <div
-                      style={{
-                        fontFamily: "Manrope, sans-serif",
-                        fontSize: 11,
-                      }}
-                    >
-                      {l.fullAddress}
-                    </div>
-                  </Tooltip>
-                </CircleMarker>
-              ))}
-          </MapContainer>
+          <ClientOnly>
+            <Suspense fallback={null}>
+              <NeighbourhoodDetailMap
+                name={data.name}
+                centerLat={data.centerLat}
+                centerLng={data.centerLng}
+                listings={listings as any}
+              />
+            </Suspense>
+          </ClientOnly>
         </div>
       </section>
 

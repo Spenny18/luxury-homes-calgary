@@ -1,4 +1,4 @@
-import { Link } from "wouter";
+import { Link } from "@/lib/router-compat";
 import { Bed, Bath, Square, MapPin } from "lucide-react";
 import type { PublicMlsListing } from "@/lib/mls-types";
 import { formatPrice, formatSqft } from "@/lib/format";
