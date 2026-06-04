@@ -2,11 +2,15 @@ import "dotenv/config";
 import express, { Response, NextFunction } from "express";
 import type { Request } from "express";
 import { registerRoutes } from "./routes";
-import { renderPage } from "vike/server";
 import { createServer } from "node:http";
 import { startSyncCron } from "./rets-sync";
 import { startLeadAlertCron } from "./lead-alert-cron";
 import path from "node:path";
+
+// Vike is ESM-only; the bundled server runs as CJS, so we have to load it via
+// dynamic import (the only CJS→ESM bridge that works at runtime). esbuild
+// preserves `import()` unchanged.
+const vikeServerPromise = import("vike/server");
 
 const app = express();
 const httpServer = createServer(app);
@@ -108,7 +112,9 @@ app.use((req, res, next) => {
 
   // Vike renders the page (SSG'd, SSR'd, or CSR-shell — depending on the
   // matched route's +config). Everything not matched by an /api/* route or a
-  // static asset above lands here.
+  // static asset above lands here. `renderPage` comes from a dynamic import
+  // because Vike is ESM-only and this server runs as CJS in production.
+  const { renderPage } = await vikeServerPromise;
   app.use(async (req, res, next) => {
     try {
       const pageContext = await renderPage({
