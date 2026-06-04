@@ -7,6 +7,7 @@
 
 import { storage } from "./storage";
 import { seedDatabase } from "./seed";
+import { getNeighbourhoodPolygon } from "./neighbourhood-polygons";
 
 // Run the idempotent seeder once when this module is first imported. The
 // build-time prerender step needs the DB populated; in production Express
@@ -72,11 +73,13 @@ export function listNeighbourhoods() {
   return storage.listNeighbourhoods().map(shapeNeighbourhood);
 }
 
-export function getNeighbourhoodDetail(slug: string) {
+export async function getNeighbourhoodDetail(slug: string) {
   const n = storage.getNeighbourhoodBySlug(slug);
   if (!n) return null;
   const listings = storage.listMlsByNeighbourhood(n.name, 24);
-  return { ...shapeNeighbourhood(n), listings };
+  // Lazy fetch + cache the OSM polygon. Null if OSM has no match.
+  const polygon = await getNeighbourhoodPolygon(n.slug, n.name);
+  return { ...shapeNeighbourhood(n), listings, polygon };
 }
 
 export function listCondoBuildings() {

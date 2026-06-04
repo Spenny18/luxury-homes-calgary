@@ -144,6 +144,7 @@ export default function NeighbourhoodDetailPage() {
                 centerLat={data.centerLat}
                 centerLng={data.centerLng}
                 listings={listings as any}
+                polygon={(data as any).polygon ?? null}
               />
             </Suspense>
           </ClientOnly>

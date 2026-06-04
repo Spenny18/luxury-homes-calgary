@@ -469,6 +469,11 @@ try {
       ["quadrant", "TEXT NOT NULL DEFAULT 'city-centre'"],
       ["borders", "TEXT NOT NULL DEFAULT '{}'"],
       ["schools", "TEXT NOT NULL DEFAULT '[]'"],
+      // Cached GeoJSON polygon (Polygon or MultiPolygon geometry) fetched
+      // from OSM Nominatim. NULL means "not fetched yet"; '""' means "fetched
+      // but no match" — distinguished so we don't refetch known-misses.
+      ["polygon", "TEXT"],
+      ["polygon_fetched_at", "TEXT"],
     ];
     for (const [name, type] of additions) {
       if (!existing.has(name)) {

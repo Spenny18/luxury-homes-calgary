@@ -5,11 +5,26 @@
 // Styling matches the mls-detail page: CARTO light tiles, black property
 // marker for the neighbourhood center, and a popup on each listing showing
 // the hero photo, price, address, and beds/baths with a deep link.
-import { MapContainer, TileLayer, CircleMarker, Marker, Popup, Tooltip } from "react-leaflet";
+import { useEffect } from "react";
+import {
+  MapContainer,
+  TileLayer,
+  CircleMarker,
+  Marker,
+  Polygon,
+  Popup,
+  Tooltip,
+  useMap,
+} from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { formatPriceCompact } from "@/lib/format";
 import { apiUrl } from "@/lib/queryClient";
+
+// GeoJSON geometry shape as returned by Nominatim's polygon_geojson endpoint.
+type PolygonGeometry =
+  | { type: "Polygon"; coordinates: number[][][] }
+  | { type: "MultiPolygon"; coordinates: number[][][][] };
 
 interface MapListing {
   id: string;
@@ -30,6 +45,36 @@ interface Props {
   centerLat: number;
   centerLng: number;
   listings: MapListing[];
+  polygon: PolygonGeometry | null;
+}
+
+// GeoJSON stores coordinates as [lng, lat] tuples. Leaflet's <Polygon>
+// expects [lat, lng]. This swaps and unwraps the Polygon / MultiPolygon
+// nesting into the array-of-rings shape Leaflet wants.
+function geoJsonToLeafletRings(geom: PolygonGeometry): [number, number][][][] {
+  const polygons =
+    geom.type === "Polygon" ? [geom.coordinates] : geom.coordinates;
+  return polygons.map((rings) =>
+    rings.map((ring) =>
+      ring.map(([lng, lat]) => [lat, lng] as [number, number]),
+    ),
+  );
+}
+
+// Pans/zooms the map to fit the polygon's bounding box on mount so the
+// neighbourhood always frames cleanly regardless of zoom prop.
+function FitToPolygon({ rings }: { rings: [number, number][][][] }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!rings.length) return;
+    const all = rings.flat(2);
+    if (!all.length) return;
+    map.fitBounds(all as L.LatLngBoundsExpression, {
+      padding: [24, 24],
+      animate: false,
+    });
+  }, [rings, map]);
+  return null;
 }
 
 // Same icon shape as the mls-detail map's property pin: black-on-white dot
@@ -56,8 +101,10 @@ export default function NeighbourhoodDetailMap({
   centerLat,
   centerLng,
   listings,
+  polygon,
 }: Props) {
   const plotted = listings.filter((l) => l.lat != null && l.lng != null);
+  const rings = polygon ? geoJsonToLeafletRings(polygon) : [];
 
   return (
     <MapContainer
@@ -70,6 +117,26 @@ export default function NeighbourhoodDetailMap({
         attribution="&copy; OpenStreetMap, &copy; CARTO"
         url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
       />
+
+      {/* Neighbourhood boundary, if OSM had a match */}
+      {rings.length > 0 && (
+        <>
+          {rings.map((polygonRings, i) => (
+            <Polygon
+              key={i}
+              positions={polygonRings}
+              pathOptions={{
+                color: "#23412d",
+                weight: 2,
+                opacity: 0.85,
+                fillColor: "#23412d",
+                fillOpacity: 0.08,
+              }}
+            />
+          ))}
+          <FitToPolygon rings={rings} />
+        </>
+      )}
 
       {/* Neighbourhood center pin */}
       <Marker position={[centerLat, centerLng]} icon={centerIcon}>
