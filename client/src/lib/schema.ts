@@ -27,6 +27,10 @@ export function organizationNode() {
     image: { "@id": LOGO_ID },
     telephone: "+1-403-966-9237",
     email: "spencer@riversrealestate.ca",
+    // Tier signal Google uses for local businesses (the "$$$$" indicator on
+    // restaurant cards, etc.). For Spencer's book this floors price-shoppers
+    // out and weights toward premium queries like "luxury realtor calgary".
+    priceRange: "$1M+",
     address: {
       "@type": "PostalAddress",
       streetAddress: "38 Elmont Cove SW",
