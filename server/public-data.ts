@@ -8,6 +8,7 @@
 import { storage } from "./storage";
 import { seedDatabase } from "./seed";
 import { getNeighbourhoodPolygon } from "./neighbourhood-polygons";
+import { pointInGeometry } from "./point-in-polygon";
 
 // Run the idempotent seeder once when this module is first imported. The
 // build-time prerender step needs the DB populated; in production Express
@@ -76,9 +77,28 @@ export function listNeighbourhoods() {
 export async function getNeighbourhoodDetail(slug: string) {
   const n = storage.getNeighbourhoodBySlug(slug);
   if (!n) return null;
-  const listings = storage.listMlsByNeighbourhood(n.name, 24);
+
   // Lazy fetch + cache the OSM polygon. Null if OSM has no match.
   const polygon = await getNeighbourhoodPolygon(n.slug, n.name);
+
+  // Over-fetch by name (CREB's `neighbourhood` field is a coarse district
+  // label) and refine to the actual boundary with the polygon below.
+  const candidates = storage.listMlsByNeighbourhood(n.name, 60);
+
+  let listings: typeof candidates;
+  if (polygon) {
+    listings = candidates.filter(
+      (l) =>
+        l.lat != null &&
+        l.lng != null &&
+        pointInGeometry(l.lng as number, l.lat as number, polygon as any),
+    );
+  } else {
+    // No polygon → fall back to the name-only match.
+    listings = candidates;
+  }
+  listings = listings.slice(0, 24);
+
   return { ...shapeNeighbourhood(n), listings, polygon };
 }
 
