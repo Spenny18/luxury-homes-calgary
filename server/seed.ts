@@ -362,11 +362,16 @@ export function seedDatabase() {
     console.log("[seed] Inserted " + SEED_LEADS.length + " leads");
   }
 
-  // 4. Neighbourhoods — UPSERT each marquee row so existing 6 get the new
-  // structured fields (quadrant, borders, schools, lifeCopy, realEstateCopy)
-  // and the additional 24 marquee rows get inserted.
+  // 4. Neighbourhoods — INSERT ONLY. The seed used to upsert these on every
+  // boot, which silently wiped Spencer's CMS edits (custom hero images, copy
+  // tweaks, etc.) on every deploy. Now we only insert rows that don't exist
+  // yet, so the seed acts purely as bootstrap data for new marquee entries.
+  // Use the CMS (/admin/cms) to edit existing rows.
+  let insertedN = 0;
   for (const n of MARQUEE_NEIGHBOURHOODS) {
-    const row = {
+    const existing = db.select().from(neighbourhoods).where(eq(neighbourhoods.slug, n.slug)).get();
+    if (existing) continue;
+    db.insert(neighbourhoods).values({
       slug: n.slug,
       name: n.name,
       tagline: n.tagline,
@@ -386,19 +391,17 @@ export function seedDatabase() {
       avgPrice: n.avgPrice,
       activeCount: 0,
       sortOrder: n.sortOrder,
-    };
-    const existing = db.select().from(neighbourhoods).where(eq(neighbourhoods.slug, n.slug)).get();
-    if (existing) {
-      db.update(neighbourhoods).set(row).where(eq(neighbourhoods.slug, n.slug)).run();
-    } else {
-      db.insert(neighbourhoods).values(row).run();
-    }
+    }).run();
+    insertedN++;
   }
-  console.log("[seed] Upserted " + MARQUEE_NEIGHBOURHOODS.length + " marquee neighbourhoods");
+  if (insertedN > 0) console.log("[seed] Inserted " + insertedN + " new marquee neighbourhoods");
 
-  // 4b. Condo buildings — same upsert pattern
+  // 4b. Condo buildings — INSERT ONLY for the same reason.
+  let insertedC = 0;
   for (const c of MARQUEE_CONDOS) {
-    const row = {
+    const existing = db.select().from(condoBuildings).where(eq(condoBuildings.slug, c.slug)).get();
+    if (existing) continue;
+    db.insert(condoBuildings).values({
       slug: c.slug,
       name: c.name,
       tagline: c.tagline,
@@ -421,15 +424,10 @@ export function seedDatabase() {
       gallery: JSON.stringify([]),
       sortOrder: c.sortOrder,
       featured: c.featured,
-    };
-    const existing = db.select().from(condoBuildings).where(eq(condoBuildings.slug, c.slug)).get();
-    if (existing) {
-      db.update(condoBuildings).set(row).where(eq(condoBuildings.slug, c.slug)).run();
-    } else {
-      db.insert(condoBuildings).values(row).run();
-    }
+    }).run();
+    insertedC++;
   }
-  console.log("[seed] Upserted " + MARQUEE_CONDOS.length + " condo buildings");
+  if (insertedC > 0) console.log("[seed] Inserted " + insertedC + " new condo buildings");
 
   // 5. Blog posts
   const existingPosts = db.select().from(blogPosts).all();
