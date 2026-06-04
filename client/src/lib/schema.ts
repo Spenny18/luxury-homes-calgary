@@ -29,8 +29,10 @@ export function organizationNode() {
     email: "spencer@riversrealestate.ca",
     address: {
       "@type": "PostalAddress",
+      streetAddress: "38 Elmont Cove SW",
       addressLocality: "Calgary",
       addressRegion: "Alberta",
+      postalCode: "T3H 6A5",
       addressCountry: "CA",
     },
     // CREB district + neighbourhood coverage Spencer markets.
