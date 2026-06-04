@@ -10,6 +10,8 @@ import { seedDatabase } from "./seed";
 import { signUpSchema, signInSchema, inquirySchema } from "@shared/schema";
 import { runSync } from "./rets-sync";
 import { fetchListingPhoto } from "./rets-photos";
+import { sendEmail } from "./email";
+import { pushLeadToFollowUpBoss } from "./follow-up-boss";
 
 const execFileAsync = promisify(execFile);
 
@@ -104,6 +106,10 @@ const inquiryLimiter = rateLimit({
   key: "inquiry",
 });
 
+// Notifies Spencer of a new inquiry via Resend (replaces the old Replit-
+// only `external-tool` subprocess call, which silently failed in
+// production for every lead because the binary doesn't exist in the Fly
+// Docker image). Resend creds + notify email are already on Fly secrets.
 async function sendInquiryEmail(opts: {
   name: string;
   email: string;
@@ -116,7 +122,15 @@ async function sendInquiryEmail(opts: {
     ? `New inquiry — ${opts.listingTitle}`
     : `New inquiry from ${opts.name}`;
 
-  const body = [
+  const escapeHtml = (s: string) =>
+    s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+
+  const text = [
     `New inquiry received via luxuryhomescalgary.ca`,
     ``,
     `Property: ${opts.listingTitle ?? "(general inquiry)"}`,
@@ -135,31 +149,33 @@ async function sendInquiryEmail(opts: {
     .filter(Boolean)
     .join("\n");
 
-  const payload = {
-    source_id: "gcal",
-    tool_name: "send_email",
-    arguments: {
-      action: {
-        action: "send",
-        to: ["spencer@riversrealestate.ca"],
-        cc: [],
-        bcc: [],
-        subject,
-        body,
-      },
-    },
-  };
+  const html = `<!doctype html><html><body style="font-family:Manrope,Arial,sans-serif;color:#0a0a0a;max-width:600px;margin:0 auto;padding:24px;line-height:1.55;">
+  <div style="font-family:'Playfair Display',Georgia,serif;font-size:24px;font-weight:600;color:#0a0a0a;letter-spacing:-0.01em;margin-bottom:6px;">New inquiry${opts.listingTitle ? ` — ${escapeHtml(opts.listingTitle)}` : ""}</div>
+  <div style="font-size:13px;color:#6b7280;margin-bottom:24px;">Received via luxuryhomescalgary.ca</div>
+  <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:14px;">
+    <tr><td style="padding:6px 16px 6px 0;color:#6b7280;width:90px;">From</td><td style="padding:6px 0;">${escapeHtml(opts.name)}</td></tr>
+    <tr><td style="padding:6px 16px 6px 0;color:#6b7280;">Email</td><td style="padding:6px 0;"><a href="mailto:${escapeHtml(opts.email)}" style="color:#23412d;">${escapeHtml(opts.email)}</a></td></tr>
+    ${opts.phone ? `<tr><td style="padding:6px 16px 6px 0;color:#6b7280;">Phone</td><td style="padding:6px 0;"><a href="tel:${escapeHtml(opts.phone)}" style="color:#23412d;">${escapeHtml(opts.phone)}</a></td></tr>` : ""}
+    ${opts.listingAddress ? `<tr><td style="padding:6px 16px 6px 0;color:#6b7280;">Address</td><td style="padding:6px 0;">${escapeHtml(opts.listingAddress)}</td></tr>` : ""}
+  </table>
+  <div style="margin:24px 0 8px;font-size:11px;letter-spacing:0.18em;color:#6b7280;text-transform:uppercase;">Message</div>
+  <div style="font-size:15px;line-height:1.6;white-space:pre-wrap;background:#fafafa;border-left:3px solid #23412d;padding:14px 16px;">${escapeHtml(opts.message)}</div>
+  <p style="margin-top:24px;font-size:12px;color:#6b7280;">Reply to this email to respond directly — the from address is set to the lead.</p>
+</body></html>`;
 
-  try {
-    const { stdout } = await execFileAsync("external-tool", [
-      "call",
-      JSON.stringify(payload),
-    ], { timeout: 20_000 });
-    return { ok: true, response: stdout };
-  } catch (err: any) {
-    console.error("[inquiry email] failed:", err?.stderr || err?.message || err);
-    return { ok: false, error: String(err?.stderr || err?.message || err) };
+  const notifyEmail =
+    process.env.SPENCER_NOTIFY_EMAIL ?? "spencer@riversrealestate.ca";
+  const result = await sendEmail({
+    to: notifyEmail,
+    subject,
+    html,
+    text,
+    replyTo: opts.email,
+  });
+  if (!result.ok) {
+    console.error("[inquiry email] resend send failed:", result.error);
   }
+  return result;
 }
 
 export async function registerRoutes(
@@ -509,7 +525,8 @@ export async function registerRoutes(
       }
     }
 
-    // Fire-and-forget email; don't block the response on it
+    // Fire-and-forget — don't block the response. Email and FUB are
+    // independent: a failure in one shouldn't stop the other.
     sendInquiryEmail({
       name: parsed.data.name,
       email: parsed.data.email,
@@ -519,6 +536,20 @@ export async function registerRoutes(
       listingAddress,
     }).then((r) => {
       if (!r.ok) console.warn("[inquiry] email did not send:", r.error);
+    });
+
+    pushLeadToFollowUpBoss({
+      name: parsed.data.name,
+      email: parsed.data.email,
+      phone: parsed.data.phone,
+      message: parsed.data.message,
+      listingTitle,
+      listingAddress,
+      source: parsed.data.source,
+    }).then((r) => {
+      if (!r.ok && !r.skipped) {
+        console.warn("[inquiry] FUB push failed:", r.error);
+      }
     });
 
     res.json({ ok: true, leadId: lead.id });
