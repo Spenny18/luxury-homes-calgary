@@ -1,5 +1,12 @@
 // Default <head> additions shared by every page.
 // Per-page +Head.tsx (or +title / +description) stacks on top of these.
+
+// Follow Up Boss Pixel (WidgetTracker WT-GFURXFCK). Matches site visitors
+// to leads in FUB so Spencer sees their pageview history on each contact
+// record. Loaded async so it doesn't block render; runs once per page
+// load on every route (public + /mls + /admin).
+const FUB_PIXEL_SRC = `(function(w,i,d,g,e,t){w["WidgetTrackerObject"]=g;(w[g]=w[g]||function() {(w[g].q=w[g].q||[]).push(arguments);}),(w[g].ds=1*new Date());(e="script"), (t=d.createElement(e)),(e=d.getElementsByTagName(e)[0]);t.async=1;t.src=i; e.parentNode.insertBefore(t,e);}) (window,"https://widgetbe.com/agent",document,"widgetTracker"); window.widgetTracker("create", "WT-GFURXFCK"); window.widgetTracker("send", "pageview");`;
+
 export default function HeadDefault() {
   return (
     <>
@@ -23,6 +30,7 @@ export default function HeadDefault() {
         href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Manrope:wght@200;300;400;500;600;700;800&display=swap"
         rel="stylesheet"
       />
+      <script dangerouslySetInnerHTML={{ __html: FUB_PIXEL_SRC }} />
     </>
   );
 }
