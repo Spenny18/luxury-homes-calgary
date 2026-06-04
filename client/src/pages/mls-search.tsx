@@ -116,7 +116,11 @@ const DEFAULT_FILTERS: Filters = {
   baths: "any",
   propertyType: "any",
   propertySubTypes: "",
-  cities: "",
+  // The RETS feed covers all of CREB (Calgary + surrounding region) but the
+  // marketing site is explicitly Calgary-only, so default the city filter to
+  // "Calgary". Users can still clear it from the filter chips to search
+  // wider — and any URL with ?cities=... in the query overrides this.
+  cities: "Calgary",
   postalCode: "",
   minSqft: "",
   maxSqft: "",
