@@ -2,6 +2,7 @@ import "dotenv/config";
 import express, { Response, NextFunction } from "express";
 import type { Request } from "express";
 import { registerRoutes } from "./routes";
+import { registerSeoRoutes } from "./seo";
 import { createServer } from "node:http";
 import { startSyncCron } from "./rets-sync";
 import { startLeadAlertCron } from "./lead-alert-cron";
@@ -70,6 +71,10 @@ app.use((req, res, next) => {
 
 (async () => {
   await registerRoutes(httpServer, app);
+  // SEO endpoints — must be registered before the Vike catch-all below so
+  // /sitemap.xml and /robots.txt don't fall through to Vike's "no page
+  // matched" error renderer.
+  registerSeoRoutes(app);
 
   try {
     startSyncCron();
