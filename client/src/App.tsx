@@ -33,6 +33,7 @@ import AdminCalendarPage from "@/pages/admin-calendar";
 import AdminMarketingPage from "@/pages/admin-marketing";
 import AdminAnalyticsPage from "@/pages/admin-analytics";
 import AdminSavedSearchesPage from "@/pages/admin-saved-searches";
+import AdminCmsPage from "@/pages/admin-cms";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType<any> }) {
   const { user, loading } = useAuth();
@@ -124,6 +125,10 @@ function AppRouter() {
       <Route
         path="/admin/mls-sync"
         component={() => <ProtectedRoute component={MlsSyncPage} />}
+      />
+      <Route
+        path="/admin/cms"
+        component={() => <ProtectedRoute component={AdminCmsPage} />}
       />
 
       <Route component={NotFound} />

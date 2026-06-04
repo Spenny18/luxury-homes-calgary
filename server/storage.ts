@@ -1151,6 +1151,10 @@ export class DatabaseStorage implements IStorage {
     }
     return db.insert(blogPosts).values(data).returning().get();
   }
+  deleteBlogPost(slug: string): boolean {
+    const res = db.delete(blogPosts).where(eq(blogPosts.slug, slug)).run();
+    return (res.changes ?? 0) > 0;
+  }
   // ---- Neighbourhoods ----------------------------------------------------
   listNeighbourhoods(): Neighbourhood[] {
     return db.select().from(neighbourhoods).orderBy(asc(neighbourhoods.sortOrder)).all();
@@ -1164,6 +1168,19 @@ export class DatabaseStorage implements IStorage {
       return db.update(neighbourhoods).set(data).where(eq(neighbourhoods.slug, data.slug!)).returning().get();
     }
     return db.insert(neighbourhoods).values(data).returning().get();
+  }
+  deleteNeighbourhood(slug: string): boolean {
+    const res = db.delete(neighbourhoods).where(eq(neighbourhoods.slug, slug)).run();
+    return (res.changes ?? 0) > 0;
+  }
+  // Clear the OSM polygon cache for a single neighbourhood so the next page
+  // visit refetches it. Used by the admin "Refetch polygon" action. Uses raw
+  // SQL because the `polygon` / `polygon_fetched_at` columns were added via
+  // the runtime migration (storage.ts top) and aren't in the drizzle schema.
+  clearNeighbourhoodPolygon(slug: string): void {
+    db.run(
+      sql`UPDATE neighbourhoods SET polygon = NULL, polygon_fetched_at = NULL WHERE slug = ${slug}`,
+    );
   }
   refreshNeighbourhoodActiveCounts() {
     const all = db.select().from(neighbourhoods).all();
@@ -1191,6 +1208,10 @@ export class DatabaseStorage implements IStorage {
       return db.update(condoBuildings).set(data).where(eq(condoBuildings.slug, data.slug!)).returning().get();
     }
     return db.insert(condoBuildings).values(data).returning().get();
+  }
+  deleteCondoBuilding(slug: string): boolean {
+    const res = db.delete(condoBuildings).where(eq(condoBuildings.slug, slug)).run();
+    return (res.changes ?? 0) > 0;
   }
   // Active MLS listings at a specific street address — used by condo detail
   // pages to show units currently for sale in the building.

@@ -12,6 +12,7 @@ import { runSync } from "./rets-sync";
 import { fetchListingPhoto } from "./rets-photos";
 import { sendEmail } from "./email";
 import { pushLeadToFollowUpBoss } from "./follow-up-boss";
+import { registerAdminCmsRoutes } from "./admin-cms";
 
 const execFileAsync = promisify(execFile);
 
@@ -807,6 +808,9 @@ export async function registerRoutes(
       lastSyncStatus: lastSync?.status ?? null,
     });
   });
+
+  // /api/admin/cms/* — condo, neighbourhood, and blog editors.
+  registerAdminCmsRoutes(app, requireAuth);
 
   // GET /api/admin/mls-sync (auth) — recent sync runs for admin sidebar
   app.get("/api/admin/mls-sync", requireAuth, (_req, res) => {
