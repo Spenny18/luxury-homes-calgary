@@ -104,7 +104,14 @@ app.use((req, res, next) => {
     // any prerendered HTML files. The catch-all below falls through to Vike
     // for routes that aren't a static file (e.g. SSR'd /, /p/:slug).
     const clientDist = path.resolve(__dirname, "client");
-    app.use(express.static(clientDist, { index: false }));
+    // `redirect: false` stops express.static from issuing a 301 to add a
+    // trailing slash when the URL matches a directory (which it does for
+    // every prerendered page, e.g. /neighbourhoods/upper-mount-royal →
+    // /neighbourhoods/upper-mount-royal/). That redirect is bad for SEO:
+    // Google's index and the sitemap use the no-slash form, and the extra
+    // hop costs link equity. Letting the request fall through to Vike's
+    // renderPage means the no-slash URL serves the page HTML directly.
+    app.use(express.static(clientDist, { index: false, redirect: false }));
   } else {
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
