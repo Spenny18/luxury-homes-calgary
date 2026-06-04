@@ -1,11 +1,17 @@
 // Default <head> additions shared by every page.
 // Per-page +Head.tsx (or +title / +description) stacks on top of these.
+import { sitewideGraph, jsonLdScriptHtml } from "@/lib/schema";
 
 // Follow Up Boss Pixel (WidgetTracker WT-GFURXFCK). Matches site visitors
 // to leads in FUB so Spencer sees their pageview history on each contact
 // record. Loaded async so it doesn't block render; runs once per page
 // load on every route (public + /mls + /admin).
 const FUB_PIXEL_SRC = `(function(w,i,d,g,e,t){w["WidgetTrackerObject"]=g;(w[g]=w[g]||function() {(w[g].q=w[g].q||[]).push(arguments);}),(w[g].ds=1*new Date());(e="script"), (t=d.createElement(e)),(e=d.getElementsByTagName(e)[0]);t.async=1;t.src=i; e.parentNode.insertBefore(t,e);}) (window,"https://widgetbe.com/agent",document,"widgetTracker"); window.widgetTracker("create", "WT-GFURXFCK"); window.widgetTracker("send", "pageview");`;
+
+// Sitewide Schema.org graph (Organization/RealEstateAgent, Person, WebSite,
+// Logo). Serialised once at module load — the contents don't depend on
+// pageContext. Per-route +Head.tsx adds page-specific @types on top.
+const SITEWIDE_JSONLD = jsonLdScriptHtml(sitewideGraph());
 
 export default function HeadDefault() {
   return (
@@ -31,6 +37,10 @@ export default function HeadDefault() {
         rel="stylesheet"
       />
       <script dangerouslySetInnerHTML={{ __html: FUB_PIXEL_SRC }} />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: SITEWIDE_JSONLD }}
+      />
     </>
   );
 }

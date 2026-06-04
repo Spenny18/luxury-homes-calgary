@@ -1,19 +1,80 @@
 import { usePageContext } from "vike-react/usePageContext";
+import {
+  placeNode,
+  breadcrumbsNode,
+  webPageNode,
+  jsonLdScriptHtml,
+} from "@/lib/schema";
 
-// Canonical for /neighbourhoods AND /neighbourhoods/:slug. Reading urlPathname
-// keeps the link in sync with whatever page Vike matched, so we only render
-// one canonical per page instead of stacking (which would happen with a
-// second +Head.tsx in the @slug subdirectory).
+// Handles /neighbourhoods (list) and /neighbourhoods/:slug (detail).
 export default function Head() {
   const pageContext = usePageContext();
   const pathname = (pageContext.urlPathname || "/neighbourhoods").replace(
     /\/$/,
     "",
   );
+  const slug = pageContext.routeParams?.slug;
+  const canonical = `https://luxuryhomescalgary.ca${pathname || "/neighbourhoods"}`;
+
+  const nodes: unknown[] = [];
+
+  if (slug) {
+    const n = pageContext.data as
+      | {
+          name?: string;
+          tagline?: string;
+          heroImage?: string | null;
+          centerLat?: number;
+          centerLng?: number;
+        }
+      | null
+      | undefined;
+    if (n?.name) {
+      nodes.push(
+        placeNode({
+          slug,
+          name: n.name,
+          description: n.tagline,
+          image: n.heroImage,
+          lat: n.centerLat,
+          lng: n.centerLng,
+        }),
+      );
+      nodes.push(
+        breadcrumbsNode([
+          { name: "Home", url: "/" },
+          { name: "Neighbourhoods", url: "/neighbourhoods" },
+          { name: n.name, url: `/neighbourhoods/${slug}` },
+        ]),
+      );
+    }
+  } else {
+    nodes.push(
+      webPageNode({
+        url: "/neighbourhoods",
+        name: "Calgary luxury neighbourhoods — Rivers Real Estate",
+        description:
+          "Calgary's luxury neighbourhoods — Springbank Hill, Aspen Woods, Upper Mount Royal, Elbow Park, Britannia, Bel-Aire and more.",
+      }),
+    );
+    nodes.push(
+      breadcrumbsNode([
+        { name: "Home", url: "/" },
+        { name: "Neighbourhoods", url: "/neighbourhoods" },
+      ]),
+    );
+  }
+
   return (
-    <link
-      rel="canonical"
-      href={`https://luxuryhomescalgary.ca${pathname || "/neighbourhoods"}`}
-    />
+    <>
+      <link rel="canonical" href={canonical} />
+      {nodes.map((n, i) => (
+        <script
+          key={i}
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: jsonLdScriptHtml(n) }}
+        />
+      ))}
+    </>
   );
 }
