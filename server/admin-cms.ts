@@ -62,6 +62,9 @@ const condoSchema = z.object({
   gallery: z.any().default([]),
   featured: z.boolean().default(false),
   sortOrder: z.union([z.number(), z.string()]).default(99),
+  // Comma-separated additional street addresses the building occupies.
+  // E.g. "137 26 Avenue SW" for The River, which spans 135 AND 137.
+  additionalAddresses: z.string().default(""),
 });
 
 function condoFromBody(body: unknown) {
@@ -90,6 +93,7 @@ function condoFromBody(body: unknown) {
     gallery: stringifyArr(parsed.gallery),
     featured: !!parsed.featured,
     sortOrder: safeNumber(parsed.sortOrder) ?? 99,
+    additionalAddresses: (parsed.additionalAddresses ?? "").trim(),
   };
 }
 

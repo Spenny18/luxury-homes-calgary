@@ -106,15 +106,64 @@ export function listCondoBuildings() {
   return storage.listCondoBuildings().map(shapeCondo);
 }
 
+// Normalize a street address into substrings we can LIKE-match against the
+// MLS feed. Handles abbreviation pairs that vary across CREB listings
+// ("Avenue" ↔ "Ave", "Street" ↔ "St", "Boulevard" ↔ "Blvd") and strips
+// city/province trailers. Returns the union of variants.
+function streetAddressVariants(full: string): string[] {
+  if (!full) return [];
+  const stripped = full.split(",")[0].trim();
+  if (!stripped) return [];
+  const variants = new Set<string>([stripped]);
+  const pairs: Array<[RegExp, string]> = [
+    [/\bAvenue\b/gi, "Ave"],
+    [/\bAve\b/gi, "Avenue"],
+    [/\bStreet\b/gi, "St"],
+    [/\bSt\b/gi, "Street"],
+    [/\bBoulevard\b/gi, "Blvd"],
+    [/\bBlvd\b/gi, "Boulevard"],
+    [/\bDrive\b/gi, "Dr"],
+    [/\bDr\b/gi, "Drive"],
+  ];
+  for (const [re, replacement] of pairs) {
+    if (re.test(stripped)) variants.add(stripped.replace(re, replacement));
+  }
+  return [...variants];
+}
+
 export function getCondoBuildingDetail(slug: string) {
   const c = storage.getCondoBuildingBySlug(slug);
   if (!c) return null;
-  let raw = storage.listingsAtBuilding(c.lat, c.lng, 75, 60);
-  if (raw.length === 0) {
-    const addressKey = c.address.split(",")[0].trim();
-    raw = storage.listingsAtAddress(addressKey, 60);
-  }
-  const listings = raw.map((l: any) => ({
+
+  // Union strategy: combine GPS proximity AND address substring matching,
+  // dedupe by listing ID. Single-strategy lookups break when either:
+  //   - the building's stored lat/lng is off (so GPS pulls neighbours
+  //     and the address fallback never fires because GPS returned >0)
+  //   - the CREB listing's address uses a different abbreviation
+  // Doing both catches the union.
+  const byGps = storage.listingsAtBuilding(c.lat, c.lng, 50, 60);
+
+  // Match against the primary address PLUS any additional addresses the
+  // building has (e.g. The River sits at both 135 AND 137 26 Avenue SW —
+  // CMS field comma-separated).
+  const extraAddresses = ((c as any).additionalAddresses ?? "")
+    .split(",")
+    .map((s: string) => s.trim())
+    .filter(Boolean);
+  const allAddresses = [c.address, ...extraAddresses];
+  const candidateMatchStrings = allAddresses.flatMap(streetAddressVariants);
+  const byAddress = candidateMatchStrings.flatMap((a) =>
+    storage.listingsAtAddress(a, 60),
+  );
+
+  const seen = new Set<string>();
+  const merged = [...byAddress, ...byGps].filter((l) => {
+    if (seen.has(l.id)) return false;
+    seen.add(l.id);
+    return true;
+  });
+
+  const listings = merged.slice(0, 60).map((l: any) => ({
     id: l.id,
     mlsNumber: l.mlsNumber,
     fullAddress: l.fullAddress,

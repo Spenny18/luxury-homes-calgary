@@ -283,6 +283,7 @@ interface CondoFormState {
   gallery: string;
   featured: boolean;
   sortOrder: string;
+  additionalAddresses: string;
 }
 
 const EMPTY_CONDO: CondoFormState = {
@@ -308,6 +309,7 @@ const EMPTY_CONDO: CondoFormState = {
   gallery: "",
   featured: false,
   sortOrder: "99",
+  additionalAddresses: "",
 };
 
 function condoToForm(c: any): CondoFormState {
@@ -335,6 +337,7 @@ function condoToForm(c: any): CondoFormState {
     gallery: arrayToTextarea(c.gallery),
     featured: !!c.featured,
     sortOrder: safeStr(c.sortOrder ?? 99),
+    additionalAddresses: safeStr(c.additionalAddresses),
   };
 }
 
@@ -450,6 +453,16 @@ function CondoForm({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Field label="Address">
           <Input value={form.address} onChange={(e) => set("address", e.target.value)} />
+        </Field>
+        <Field
+          label="Additional addresses"
+          hint="Comma-separated. For buildings that occupy more than one street number (e.g. The River is at both 135 and 137 26 Ave SW — set this to '137 26 Avenue SW')."
+        >
+          <Input
+            value={form.additionalAddresses}
+            onChange={(e) => set("additionalAddresses", e.target.value)}
+            placeholder="137 26 Avenue SW, 139 26 Avenue SW"
+          />
         </Field>
         <Field label="Neighbourhood (display name)">
           <Input value={form.neighbourhood} onChange={(e) => set("neighbourhood", e.target.value)} />

@@ -486,6 +486,29 @@ try {
   console.error("[migration] failed to add neighbourhoods columns:", err);
 }
 
+// Condo buildings table additions (idempotent).
+try {
+  const cols = sqlite.prepare("PRAGMA table_info(condo_buildings)").all() as Array<{ name: string }>;
+  if (cols.length > 0) {
+    const existing = new Set(cols.map((c) => c.name));
+    const additions: Array<[string, string]> = [
+      // Comma-separated list of additional street addresses the building
+      // occupies. Used by the condo-detail page to match active MLS listings
+      // for buildings that span more than one street number (e.g. The River
+      // is at both 135 AND 137 26 Avenue SW).
+      ["additional_addresses", "TEXT NOT NULL DEFAULT ''"],
+    ];
+    for (const [name, type] of additions) {
+      if (!existing.has(name)) {
+        sqlite.exec(`ALTER TABLE condo_buildings ADD COLUMN ${name} ${type}`);
+        console.log(`[migration] added ${name} to condo_buildings`);
+      }
+    }
+  }
+} catch (err) {
+  console.error("[migration] failed to add condo_buildings columns:", err);
+}
+
 export const db = drizzle(sqlite);
 
 // Convert raw row → public-shape (parse JSON arrays)
