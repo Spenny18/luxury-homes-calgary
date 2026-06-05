@@ -497,6 +497,9 @@ try {
       // for buildings that span more than one street number (e.g. The River
       // is at both 135 AND 137 26 Avenue SW).
       ["additional_addresses", "TEXT NOT NULL DEFAULT ''"],
+      // Optional CMS-edited FAQ override. JSON array of {q, a}. Empty array
+      // means "fall back to the auto-generated FAQ in condo-faqs.ts".
+      ["faqs", "TEXT NOT NULL DEFAULT '[]'"],
     ];
     for (const [name, type] of additions) {
       if (!existing.has(name)) {

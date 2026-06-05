@@ -355,6 +355,10 @@ export const condoBuildings = sqliteTable("condo_buildings", {
   // more than one street number (e.g. The River is at both 135 AND 137 26
   // Avenue SW). The condo-detail page also matches listings at any of these.
   additionalAddresses: text("additional_addresses").notNull().default(""),
+  // Optional CMS-edited FAQ override. JSON array of {q, a}. Empty array
+  // (the default) means the page falls back to the auto-generated FAQ
+  // built from the building's structured fields.
+  faqs: text("faqs").notNull().default("[]"),
 });
 
 export type CondoBuilding = typeof condoBuildings.$inferSelect;

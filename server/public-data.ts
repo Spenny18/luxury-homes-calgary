@@ -67,6 +67,11 @@ function shapeCondo(c: any) {
     architecturalCopy: parseJsonArr(c.architecturalCopy),
     amenities: parseJsonArr(c.amenities),
     gallery: parseJsonArr(c.gallery),
+    // CMS-edited FAQ override. Empty array means the client falls back to
+    // the auto-generated FAQ in client/src/lib/condo-faqs.ts.
+    faqs: parseJsonArr(c.faqs).filter(
+      (f: any) => f && (typeof f.q === "string") && (typeof f.a === "string"),
+    ),
   };
 }
 

@@ -65,6 +65,17 @@ const condoSchema = z.object({
   // Comma-separated additional street addresses the building occupies.
   // E.g. "137 26 Avenue SW" for The River, which spans 135 AND 137.
   additionalAddresses: z.string().default(""),
+  // Optional CMS-edited FAQ override. Array of {q, a} pairs. Empty array
+  // (the default) means the public page falls back to the auto-generated
+  // FAQ built from the building's structured fields.
+  faqs: z
+    .array(
+      z.object({
+        q: z.string(),
+        a: z.string(),
+      }),
+    )
+    .default([]),
 });
 
 function condoFromBody(body: unknown) {
@@ -94,6 +105,13 @@ function condoFromBody(body: unknown) {
     featured: !!parsed.featured,
     sortOrder: safeNumber(parsed.sortOrder) ?? 99,
     additionalAddresses: (parsed.additionalAddresses ?? "").trim(),
+    // Drop empty pairs (both q and a blank). Store as JSON so SQLite holds
+    // a stable string; the public route parses it back on read.
+    faqs: JSON.stringify(
+      (parsed.faqs ?? []).filter(
+        (f: any) => (f?.q ?? "").trim() || (f?.a ?? "").trim(),
+      ),
+    ),
   };
 }
 

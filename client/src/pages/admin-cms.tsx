@@ -284,6 +284,7 @@ interface CondoFormState {
   featured: boolean;
   sortOrder: string;
   additionalAddresses: string;
+  faqs: Array<{ q: string; a: string }>;
 }
 
 const EMPTY_CONDO: CondoFormState = {
@@ -310,6 +311,7 @@ const EMPTY_CONDO: CondoFormState = {
   featured: false,
   sortOrder: "99",
   additionalAddresses: "",
+  faqs: [],
 };
 
 function condoToForm(c: any): CondoFormState {
@@ -338,6 +340,12 @@ function condoToForm(c: any): CondoFormState {
     featured: !!c.featured,
     sortOrder: safeStr(c.sortOrder ?? 99),
     additionalAddresses: safeStr(c.additionalAddresses),
+    faqs: Array.isArray(c.faqs)
+      ? (c.faqs as any[]).map((f) => ({
+          q: safeStr(f?.q),
+          a: safeStr(f?.a),
+        }))
+      : [],
   };
 }
 
@@ -511,6 +519,88 @@ function CondoForm({
       <Field label="Gallery image URLs" hint="One URL per line">
         <Textarea rows={4} value={form.gallery} onChange={(e) => set("gallery", e.target.value)} />
       </Field>
+
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <Label className="text-[11px] tracking-[0.18em] font-display text-muted-foreground uppercase">
+            FAQ
+          </Label>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              set("faqs", [...(form.faqs ?? []), { q: "", a: "" }])
+            }
+          >
+            <Plus className="h-3.5 w-3.5 mr-1" /> Add question
+          </Button>
+        </div>
+        <p className="text-[11px] text-muted-foreground mb-3">
+          Leave empty to auto-generate from the building's structured data. Any
+          entries here override the auto-generated FAQ for both the visible
+          accordion AND the FAQPage schema (Google rich result).
+        </p>
+        {(form.faqs ?? []).length === 0 ? (
+          <div className="border border-dashed border-border rounded-sm p-6 text-center text-sm text-muted-foreground">
+            No custom FAQ — using auto-generated. Click "Add question" to override.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {(form.faqs ?? []).map((row, i) => (
+              <div
+                key={i}
+                className="border border-border rounded-sm p-3 space-y-2 bg-secondary/30"
+              >
+                <div className="flex items-start gap-2">
+                  <div className="text-[10px] tracking-[0.18em] font-display text-muted-foreground pt-2 w-4">
+                    Q{i + 1}
+                  </div>
+                  <Input
+                    value={row.q}
+                    onChange={(e) => {
+                      const next = [...form.faqs];
+                      next[i] = { ...next[i], q: e.target.value };
+                      set("faqs", next);
+                    }}
+                    placeholder="What's the question?"
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => {
+                      const next = form.faqs.filter((_, j) => j !== i);
+                      set("faqs", next);
+                    }}
+                    aria-label="Remove question"
+                  >
+                    <Trash2 className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </div>
+                <div className="flex items-start gap-2">
+                  <div className="text-[10px] tracking-[0.18em] font-display text-muted-foreground pt-2 w-4">
+                    A
+                  </div>
+                  <Textarea
+                    rows={3}
+                    value={row.a}
+                    onChange={(e) => {
+                      const next = [...form.faqs];
+                      next[i] = { ...next[i], a: e.target.value };
+                      set("faqs", next);
+                    }}
+                    placeholder="Plain-text answer. Keep it tight — 1–3 sentences works best for rich results."
+                    className="flex-1"
+                  />
+                  <div className="w-9" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="flex items-center gap-3">
         <Switch checked={form.featured} onCheckedChange={(v) => set("featured", v)} />

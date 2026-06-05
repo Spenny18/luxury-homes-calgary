@@ -300,24 +300,29 @@ export default function CondoDetailPage() {
         </div>
       </section>
 
-      {/* FAQs — auto-generated from the building's structured data plus the
-          live listings. Renders only if at least one Q&A pair could be built.
-          Schema.org FAQPage emitted in pages/condos/+Head.tsx. */}
+      {/* FAQs — CMS-edited override if present, otherwise auto-generated
+          from the building's structured fields and live listings. Schema.org
+          FAQPage emitted in pages/condos/+Head.tsx (same selection logic so
+          what Google sees matches the accordion). */}
       <FaqAccordion
-        items={buildCondoFaqs({
-          name: data.name,
-          slug: data.slug,
-          address: data.address,
-          neighbourhood: data.neighbourhood,
-          neighbourhoodSlug: data.neighbourhoodSlug,
-          units: data.units,
-          stories: data.stories,
-          builtIn: data.builtIn,
-          developer: data.developer,
-          architect: data.architect,
-          amenities: data.amenities,
-          listings: data.listings,
-        })}
+        items={
+          (data as any).faqs?.length
+            ? (data as any).faqs
+            : buildCondoFaqs({
+                name: data.name,
+                slug: data.slug,
+                address: data.address,
+                neighbourhood: data.neighbourhood,
+                neighbourhoodSlug: data.neighbourhoodSlug,
+                units: data.units,
+                stories: data.stories,
+                builtIn: data.builtIn,
+                developer: data.developer,
+                architect: data.architect,
+                amenities: data.amenities,
+                listings: data.listings,
+              })
+        }
       />
 
       {/* CTA */}

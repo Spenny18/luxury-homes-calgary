@@ -35,6 +35,7 @@ export default function Head() {
           architect?: string | null;
           amenities?: string[];
           listings?: Array<{ listPrice: number }>;
+          faqs?: Array<{ q: string; a: string }>;
         }
       | null
       | undefined;
@@ -62,23 +63,24 @@ export default function Head() {
         ]),
       );
 
-      // FAQPage — generated from the same structured data the page renders
-      // visibly, so what Google sees in the SERP exactly matches the
-      // accordion below the fold.
-      const faqs = buildCondoFaqs({
-        name: c.name,
-        slug,
-        address: c.address,
-        neighbourhood: c.neighbourhood,
-        neighbourhoodSlug: c.neighbourhoodSlug,
-        units: c.units,
-        stories: c.stories,
-        builtIn: c.builtIn,
-        developer: c.developer,
-        architect: c.architect,
-        amenities: c.amenities,
-        listings: c.listings,
-      });
+      // FAQPage — prefer the CMS-edited override; fall back to the auto-
+      // generated list so Google always sees what's visible on the page.
+      const faqs = c.faqs?.length
+        ? c.faqs
+        : buildCondoFaqs({
+            name: c.name,
+            slug,
+            address: c.address,
+            neighbourhood: c.neighbourhood,
+            neighbourhoodSlug: c.neighbourhoodSlug,
+            units: c.units,
+            stories: c.stories,
+            builtIn: c.builtIn,
+            developer: c.developer,
+            architect: c.architect,
+            amenities: c.amenities,
+            listings: c.listings,
+          });
       const faqNode = faqPageNode({ url: `/condos/${slug}`, items: faqs });
       if (faqNode) nodes.push(faqNode);
     }
