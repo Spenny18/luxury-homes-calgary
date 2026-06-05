@@ -9,6 +9,11 @@ import { apiUrl } from "@/lib/queryClient";
 
 // Lazy-loaded Leaflet wrapper — keeps the map out of the SSR bundle.
 const CondoDetailMap = lazy(() => import("@/components/condo-detail-map"));
+// POI explorer (schools, dining, parks, transit + walk/drive routing).
+// Lazy for the same SSR reason — pulls in react-leaflet.
+const NeighbourhoodPois = lazy(
+  () => import("@/components/neighbourhood-pois"),
+);
 
 interface CondoDetail {
   slug: string;
@@ -263,6 +268,18 @@ export default function CondoDetailPage() {
             </Suspense>
           </ClientOnly>
         </div>
+
+        {/* POIs — schools, dining, parks, transit + walk/drive routes */}
+        <ClientOnly>
+          <Suspense fallback={null}>
+            <NeighbourhoodPois
+              poisUrl={`/api/public/condos/${data.slug}/pois`}
+              lat={data.lat}
+              lng={data.lng}
+            />
+          </Suspense>
+        </ClientOnly>
+
         <div className="mt-4 flex items-center gap-3 flex-wrap">
           <a
             href={`https://www.google.com/maps/dir/?api=1&destination=${data.lat},${data.lng}`}

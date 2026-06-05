@@ -13,6 +13,7 @@ import { fetchListingPhoto } from "./rets-photos";
 import { sendEmail } from "./email";
 import { pushLeadToFollowUpBoss } from "./follow-up-boss";
 import { registerAdminCmsRoutes } from "./admin-cms";
+import { fetchPoisAt } from "./pois";
 
 const execFileAsync = promisify(execFile);
 
@@ -757,6 +758,43 @@ export async function registerRoutes(
       gallery: parseJsonArr(c.gallery),
       listings,
     });
+  });
+
+  // GET /api/public/condos/:slug/pois — schools, restaurants, parks, transit
+  // within 1km of the building. Uses the same Overpass + cache helper as the
+  // MLS listing version (the cache is lat/lng-keyed so it's shared across
+  // entity types that happen to sit at the same point).
+  app.get("/api/public/condos/:slug/pois", async (req, res) => {
+    const c = storage.getCondoBuildingBySlug(req.params.slug);
+    if (!c) return res.status(404).json({ message: "Condo not found" });
+    if (c.lat == null || c.lng == null) {
+      return res.json({
+        center: { lat: null, lng: null },
+        radius: 1000,
+        schools: [],
+        restaurants: [],
+        parks: [],
+        transit: [],
+        cached: false,
+        message: "No coordinates for building",
+      });
+    }
+    try {
+      const payload = await fetchPoisAt(Number(c.lat), Number(c.lng), 1000);
+      res.json(payload);
+    } catch (err: any) {
+      console.error("[condo pois]", err?.message ?? err);
+      res.json({
+        center: { lat: c.lat, lng: c.lng },
+        radius: 1000,
+        schools: [],
+        restaurants: [],
+        parks: [],
+        transit: [],
+        cached: false,
+        error: err?.message ?? "POI lookup failed",
+      });
+    }
   });
 
   // GET /api/public/neighbourhoods/:slug
