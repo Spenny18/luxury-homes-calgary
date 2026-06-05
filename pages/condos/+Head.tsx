@@ -3,8 +3,10 @@ import {
   apartmentComplexNode,
   breadcrumbsNode,
   webPageNode,
+  faqPageNode,
   jsonLdScriptHtml,
 } from "@/lib/schema";
+import { buildCondoFaqs } from "@/lib/condo-faqs";
 
 // Handles /condos (list) and /condos/:slug (detail).
 export default function Head() {
@@ -22,12 +24,17 @@ export default function Head() {
           tagline?: string;
           heroImage?: string | null;
           address?: string | null;
+          neighbourhood?: string | null;
+          neighbourhoodSlug?: string | null;
           lat?: number;
           lng?: number;
           units?: number | null;
           stories?: number | null;
           builtIn?: number | null;
+          developer?: string | null;
+          architect?: string | null;
           amenities?: string[];
+          listings?: Array<{ listPrice: number }>;
         }
       | null
       | undefined;
@@ -54,6 +61,26 @@ export default function Head() {
           { name: c.name, url: `/condos/${slug}` },
         ]),
       );
+
+      // FAQPage — generated from the same structured data the page renders
+      // visibly, so what Google sees in the SERP exactly matches the
+      // accordion below the fold.
+      const faqs = buildCondoFaqs({
+        name: c.name,
+        slug,
+        address: c.address,
+        neighbourhood: c.neighbourhood,
+        neighbourhoodSlug: c.neighbourhoodSlug,
+        units: c.units,
+        stories: c.stories,
+        builtIn: c.builtIn,
+        developer: c.developer,
+        architect: c.architect,
+        amenities: c.amenities,
+        listings: c.listings,
+      });
+      const faqNode = faqPageNode({ url: `/condos/${slug}`, items: faqs });
+      if (faqNode) nodes.push(faqNode);
     }
   } else {
     nodes.push(

@@ -418,6 +418,33 @@ export function realEstateListingNode(opts: {
   };
 }
 
+// ----- FAQPage --------------------------------------------------------------
+
+export interface FaqEntry {
+  q: string;
+  a: string;
+}
+
+export function faqPageNode(opts: {
+  url: string;
+  items: FaqEntry[];
+}) {
+  if (!opts.items?.length) return null;
+  return {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "@id": `${absoluteUrl(opts.url)}#faq`,
+    mainEntity: opts.items.map((item) => ({
+      "@type": "Question",
+      name: item.q,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: item.a,
+      },
+    })),
+  };
+}
+
 // ----- AboutPage ------------------------------------------------------------
 
 export function aboutPageNode() {

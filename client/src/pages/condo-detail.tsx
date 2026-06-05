@@ -4,8 +4,10 @@ import { useData } from "vike-react/useData";
 import { ChevronLeft, MapPin, ArrowRight, Building2, Layers, Calendar } from "lucide-react";
 import { PublicLayout } from "@/components/public-layout";
 import { ClientOnly } from "@/components/client-only";
+import { FaqAccordion } from "@/components/faq-accordion";
 import { formatPrice, formatSqft } from "@/lib/format";
 import { apiUrl } from "@/lib/queryClient";
+import { buildCondoFaqs } from "@/lib/condo-faqs";
 
 // Lazy-loaded Leaflet wrapper — keeps the map out of the SSR bundle.
 const CondoDetailMap = lazy(() => import("@/components/condo-detail-map"));
@@ -297,6 +299,26 @@ export default function CondoDetailPage() {
           </Link>
         </div>
       </section>
+
+      {/* FAQs — auto-generated from the building's structured data plus the
+          live listings. Renders only if at least one Q&A pair could be built.
+          Schema.org FAQPage emitted in pages/condos/+Head.tsx. */}
+      <FaqAccordion
+        items={buildCondoFaqs({
+          name: data.name,
+          slug: data.slug,
+          address: data.address,
+          neighbourhood: data.neighbourhood,
+          neighbourhoodSlug: data.neighbourhoodSlug,
+          units: data.units,
+          stories: data.stories,
+          builtIn: data.builtIn,
+          developer: data.developer,
+          architect: data.architect,
+          amenities: data.amenities,
+          listings: data.listings,
+        })}
+      />
 
       {/* CTA */}
       <section className="bg-foreground text-background">
