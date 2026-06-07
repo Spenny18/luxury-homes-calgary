@@ -140,17 +140,19 @@ export function getCondoBuildingDetail(slug: string) {
   const c = storage.getCondoBuildingBySlug(slug);
   if (!c) return null;
 
-  // Union strategy: combine GPS proximity AND address substring matching,
-  // dedupe by listing ID. Single-strategy lookups break when either:
-  //   - the building's stored lat/lng is off (so GPS pulls neighbours
-  //     and the address fallback never fires because GPS returned >0)
-  //   - the CREB listing's address uses a different abbreviation
-  // Doing both catches the union.
-  const byGps = storage.listingsAtBuilding(c.lat, c.lng, 50, 60);
-
-  // Match against the primary address PLUS any additional addresses the
-  // building has (e.g. The River sits at both 135 AND 137 26 Avenue SW —
-  // CMS field comma-separated).
+  // Address-first strategy. The previous version unioned address-match with
+  // a 50m GPS radius, but downtown buildings are dense enough that 50m drags
+  // in neighbours — Park Point at 1118 12 Ave SW was matching units at 1107
+  // 15 Ave SW, Vogue was matching the whole block, etc. The pragmatic rule:
+  //
+  //   - Match by the building's actual street address(es), with common
+  //     abbreviation variants (Avenue/Ave, Street/St, etc).
+  //   - Only fall back to GPS proximity if address matching returns ZERO
+  //     listings — and use a tight 25m radius so the fallback can't reach
+  //     adjacent buildings.
+  //   - Spencer can extend address coverage via the CMS `additionalAddresses`
+  //     field for buildings that span more than one street number
+  //     (e.g. The River = 135 + 137 26 Avenue SW).
   const extraAddresses = ((c as any).additionalAddresses ?? "")
     .split(",")
     .map((s: string) => s.trim())
@@ -161,12 +163,22 @@ export function getCondoBuildingDetail(slug: string) {
     storage.listingsAtAddress(a, 60),
   );
 
-  const seen = new Set<string>();
-  const merged = [...byAddress, ...byGps].filter((l) => {
-    if (seen.has(l.id)) return false;
-    seen.add(l.id);
-    return true;
-  });
+  let merged: typeof byAddress;
+  if (byAddress.length > 0) {
+    // Dedupe by listing ID — variant matching can return the same row twice
+    // when both "Avenue" and "Ave" forms hit.
+    const seen = new Set<string>();
+    merged = byAddress.filter((l) => {
+      if (seen.has(l.id)) return false;
+      seen.add(l.id);
+      return true;
+    });
+  } else {
+    // Fallback: tight GPS for buildings whose addresses are recorded in a
+    // format CREB doesn't use (rare; lets us still surface listings even
+    // when the address strings don't line up).
+    merged = storage.listingsAtBuilding(c.lat, c.lng, 25, 60);
+  }
 
   const listings = merged.slice(0, 60).map((l: any) => ({
     id: l.id,
