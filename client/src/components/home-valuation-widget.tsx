@@ -179,18 +179,29 @@ const BASEMENTS = [
   "Other",
 ];
 const POOLS = ["None", "Inground", "Abv Grnd", "Indoor"];
-const AGES = [
-  "New",
-  "0-5",
-  "6-10",
-  "11-15",
-  "16-30",
-  "31-50",
-  "51-99",
-  "100+",
-  "Unknown",
-];
 const ACS = ["Central Air", "Window Unit", "Wall Unit", "None", "Other"];
+
+// Gnowise's API only accepts age as one of these bucketed strings (PDF §5.6).
+// We collect a year-built integer from the user (much better UX than asking
+// them to subtract from the current year) and convert to the right bucket
+// just before submitting. The model can't distinguish 2018 from 2020 — both
+// land in the same bucket — but a year input is friction-free where a
+// dropdown was a chore. Computed once at module load; an end-of-year tick
+// just gives next year's first deploy the new floor.
+const CURRENT_YEAR = new Date().getFullYear();
+function yearToAgeBucket(year: number | undefined): string | undefined {
+  if (year == null || !Number.isFinite(year)) return undefined;
+  if (year < 1800 || year > CURRENT_YEAR + 5) return undefined;
+  const age = CURRENT_YEAR - year;
+  if (age <= 0) return "New";
+  if (age <= 5) return "0-5";
+  if (age <= 10) return "6-10";
+  if (age <= 15) return "11-15";
+  if (age <= 30) return "16-30";
+  if (age <= 50) return "31-50";
+  if (age <= 99) return "51-99";
+  return "100+";
+}
 const GARAGES = [
   "Attached",
   "Detached",
@@ -204,6 +215,8 @@ const GARAGES = [
 
 // Refinement form state. Mirrors the optional attributes the server route
 // accepts; the server discards anything blank before forwarding to Gnowise.
+// `yearBuilt` is a UX-level field — the user enters a year (e.g. 2018) and
+// we bucket it to Gnowise's `Age` enum (e.g. "6-10") at submit time.
 interface RefinementFormState {
   propertyType: string;
   style: string;
@@ -211,7 +224,7 @@ interface RefinementFormState {
   washrooms: string;
   roomsArea: string;
   lotArea: string;
-  age: string;
+  yearBuilt: string;
   condition: string;
   basement: string;
   garageType: string;
@@ -231,7 +244,7 @@ const refinementDefaults = (isCondo: boolean): RefinementFormState => ({
   washrooms: "",
   roomsArea: "",
   lotArea: "",
-  age: "",
+  yearBuilt: "",
   condition: "3",
   basement: isCondo ? "" : "Finished",
   garageType: isCondo ? "Underground" : "Attached",
@@ -339,7 +352,7 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
         washrooms: numeric(details.washrooms),
         roomsArea: numeric(details.roomsArea),
         lotArea: numeric(details.lotArea),
-        age: text(details.age),
+        age: yearToAgeBucket(numeric(details.yearBuilt)),
         basement: text(details.basement),
         garageType: text(details.garageType),
         garageSpaces: numeric(details.garageSpaces),
@@ -412,7 +425,7 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
         washrooms: numeric(attrs.washrooms),
         roomsArea: numeric(attrs.roomsArea),
         lotArea: numeric(attrs.lotArea),
-        age: text(attrs.age),
+        age: yearToAgeBucket(numeric(attrs.yearBuilt)),
         basement: text(attrs.basement),
         garageType: text(attrs.garageType),
         garageSpaces: numeric(attrs.garageSpaces),
@@ -822,33 +835,25 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
                       <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div className="space-y-1.5">
                           <Label
-                            htmlFor="val-age"
+                            htmlFor="val-year"
                             className="text-[11px]"
                           >
-                            Year/age range
+                            Year built
                           </Label>
-                          <Select
-                            value={details.age}
-                            onValueChange={(v) => updateDetail("age", v)}
-                          >
-                            <SelectTrigger
-                              id="val-age"
-                              className="h-9 text-[13px]"
-                            >
-                              <SelectValue placeholder="Choose" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {AGES.map((a) => (
-                                <SelectItem key={a} value={a}>
-                                  {a === "New"
-                                    ? "New"
-                                    : a === "Unknown"
-                                      ? "Not sure"
-                                      : `${a} years`}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <Input
+                            id="val-year"
+                            type="number"
+                            inputMode="numeric"
+                            min={1850}
+                            max={CURRENT_YEAR + 5}
+                            value={details.yearBuilt}
+                            onChange={(e) =>
+                              updateDetail("yearBuilt", e.target.value)
+                            }
+                            placeholder={String(CURRENT_YEAR - 8)}
+                            className="h-9 text-[13px]"
+                            data-testid="input-year-built"
+                          />
                         </div>
                         <div className="space-y-1.5">
                           <Label
@@ -1584,21 +1589,20 @@ function RefinementForm({
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor={`ag-${entry.id}`} className="text-[11px]">
-            Age
+          <Label htmlFor={`yr-${entry.id}`} className="text-[11px]">
+            Year built
           </Label>
-          <Select value={form.age} onValueChange={(v) => update("age", v)}>
-            <SelectTrigger id={`ag-${entry.id}`} className="h-9 text-[13px]">
-              <SelectValue placeholder="Choose" />
-            </SelectTrigger>
-            <SelectContent>
-              {AGES.map((a) => (
-                <SelectItem key={a} value={a}>
-                  {a}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Input
+            id={`yr-${entry.id}`}
+            type="number"
+            inputMode="numeric"
+            min={1850}
+            max={CURRENT_YEAR + 5}
+            value={form.yearBuilt}
+            onChange={(e) => update("yearBuilt", e.target.value)}
+            placeholder={String(CURRENT_YEAR - 8)}
+            className="h-9 text-[13px]"
+          />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor={`co-${entry.id}`} className="text-[11px]">
