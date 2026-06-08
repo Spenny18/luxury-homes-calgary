@@ -47,6 +47,7 @@ function buildSitemap(): string {
   urls.push({ loc: `${HOST}/`, lastmod: today, changefreq: "weekly", priority: "1.0" });
   urls.push({ loc: `${HOST}/about`, lastmod: today, changefreq: "monthly", priority: "0.7" });
   urls.push({ loc: `${HOST}/contact`, lastmod: today, changefreq: "monthly", priority: "0.6" });
+  urls.push({ loc: `${HOST}/home-evaluation`, lastmod: today, changefreq: "monthly", priority: "0.9" });
   urls.push({ loc: `${HOST}/neighbourhoods`, lastmod: today, changefreq: "weekly", priority: "0.8" });
   urls.push({ loc: `${HOST}/condos`, lastmod: today, changefreq: "weekly", priority: "0.8" });
   urls.push({ loc: `${HOST}/blog`, lastmod: today, changefreq: "weekly", priority: "0.8" });

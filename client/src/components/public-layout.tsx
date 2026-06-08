@@ -15,6 +15,7 @@ const NAV: NavItem[] = [
   { label: "MLS Search", href: "/mls" },
   { label: "Neighbourhoods", href: "/neighbourhoods" },
   { label: "Condos", href: "/condos" },
+  { label: "Evaluation", href: "/home-evaluation" },
   { label: "About", href: "/about" },
   { label: "Journal", href: "/blog" },
   { label: "Contact", href: "/contact" },

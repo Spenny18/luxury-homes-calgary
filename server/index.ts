@@ -76,6 +76,14 @@ app.use((req, res, next) => {
   // matched" error renderer.
   registerSeoRoutes(app);
 
+  // Legacy alias redirects. The WordPress site uses /home-valuation
+  // (American spelling); Spencer's recent marketing uses /home-evaluation
+  // (the spelling he asked us to use). Catch the old form here so any
+  // backlink to the WP URL lands on the working page.
+  app.get(["/home-valuation", "/home-valuation/"], (_req, res) => {
+    res.redirect(301, "/home-evaluation");
+  });
+
   try {
     startSyncCron();
   } catch (err) {
