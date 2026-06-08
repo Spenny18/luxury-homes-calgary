@@ -247,8 +247,11 @@ export function buildValuationEmailHtml(opts: {
   estimate: number;
   valueLow?: number;
   valueHigh?: number;
-  riskOfDecline?: number;
-  parameters?: Record<string, unknown>;
+  /** 0..1 — higher is better. Replaces the old risk_of_decline. */
+  confidence?: number;
+  estimatedLease?: number;
+  capRate?: number;
+  parameters?: Record<string, any>;
   origin: string;
 }): string {
   const {
@@ -257,7 +260,9 @@ export function buildValuationEmailHtml(opts: {
     estimate,
     valueLow,
     valueHigh,
-    riskOfDecline,
+    confidence,
+    estimatedLease,
+    capRate,
     parameters,
     origin,
   } = opts;
@@ -266,11 +271,11 @@ export function buildValuationEmailHtml(opts: {
   const greeting = recipientFirstName
     ? `Hi ${recipientFirstName} —`
     : `Here's your estimate —`;
-  const confidence =
-    typeof riskOfDecline === "number"
-      ? riskOfDecline < 20
+  const confidenceLabel =
+    typeof confidence === "number"
+      ? confidence >= 0.8
         ? "High"
-        : riskOfDecline < 50
+        : confidence >= 0.5
           ? "Moderate"
           : "Lower (local data is thin)"
       : null;
@@ -303,7 +308,16 @@ export function buildValuationEmailHtml(opts: {
                 ? `<div style="font-family:'Manrope',Arial,sans-serif;font-size:13px;color:${BRAND.mute};margin-top:8px;">Likely range <strong style="color:${BRAND.black};">${fmt(valueLow)}</strong> &ndash; <strong style="color:${BRAND.black};">${fmt(valueHigh)}</strong></div>`
                 : ""
             }
-            ${confidence ? `<div style="font-family:'Manrope',Arial,sans-serif;font-size:12px;color:${BRAND.mute};margin-top:6px;">Model confidence: <strong style="color:${BRAND.black};">${confidence}</strong></div>` : ""}
+            ${confidenceLabel ? `<div style="font-family:'Manrope',Arial,sans-serif;font-size:12px;color:${BRAND.mute};margin-top:6px;">Model confidence: <strong style="color:${BRAND.black};">${confidenceLabel}</strong></div>` : ""}
+            ${
+              typeof estimatedLease === "number" || typeof capRate === "number"
+                ? `<div style="margin-top:14px;padding-top:14px;border-top:1px solid ${BRAND.border};font-size:12px;color:${BRAND.mute};">
+                    ${typeof estimatedLease === "number" ? `Estimated monthly rent: <strong style="color:${BRAND.black};">${fmt(estimatedLease)}</strong>` : ""}
+                    ${typeof estimatedLease === "number" && typeof capRate === "number" ? " · " : ""}
+                    ${typeof capRate === "number" ? `Cap rate: <strong style="color:${BRAND.black};">${(capRate * 100).toFixed(2)}%</strong>` : ""}
+                  </div>`
+                : ""
+            }
           </div>
         </td></tr>
         ${
@@ -311,14 +325,31 @@ export function buildValuationEmailHtml(opts: {
             ? `<tr><td style="padding:20px 36px 0;">
                 <div style="font-family:'Manrope',Arial,sans-serif;font-size:10px;letter-spacing:0.18em;color:${BRAND.mute};text-transform:uppercase;margin-bottom:8px;">Property details (inferred)</div>
                 <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-                  ${paramRow("Type", parameters.PropertyType)}
-                  ${paramRow("Style", parameters.BuildingStyle)}
-                  ${paramRow("Bedrooms", parameters.Bedrooms)}
-                  ${paramRow("Bathrooms", parameters.Bathrooms)}
-                  ${paramRow("Interior", parameters.RoomsArea ? `${(parameters.RoomsArea as number).toLocaleString("en-CA")} sqft` : null)}
-                  ${paramRow("Lot", parameters.LotArea && (parameters.LotArea as number) > 0 ? `${(parameters.LotArea as number).toLocaleString("en-CA")} sqft` : null)}
-                  ${paramRow("Basement", parameters.BasementType)}
-                  ${paramRow("Pool", parameters.PoolType && parameters.PoolType !== "None" ? parameters.PoolType : null)}
+                  ${paramRow("Type", parameters.PropertyType ?? parameters.property_type)}
+                  ${paramRow("Style", parameters.Style ?? parameters.BuildingStyle ?? parameters.style)}
+                  ${paramRow("Bedrooms", parameters.Bedrooms ?? parameters.bedrooms)}
+                  ${paramRow("Washrooms", parameters.Washrooms ?? parameters.Bathrooms ?? parameters.washrooms)}
+                  ${paramRow(
+                    "Interior",
+                    (parameters.RoomsArea ?? parameters.rooms_area)
+                      ? `${(parameters.RoomsArea ?? parameters.rooms_area).toLocaleString("en-CA")} sqft`
+                      : null,
+                  )}
+                  ${paramRow(
+                    "Lot",
+                    (parameters.LotArea ?? parameters.lot_area) && (parameters.LotArea ?? parameters.lot_area) > 0
+                      ? `${(parameters.LotArea ?? parameters.lot_area).toLocaleString("en-CA")} sqft`
+                      : null,
+                  )}
+                  ${paramRow("Basement", parameters.Basement ?? parameters.BasementType ?? parameters.basement)}
+                  ${paramRow(
+                    "Pool",
+                    (parameters.Pool ?? parameters.PoolType) && (parameters.Pool ?? parameters.PoolType) !== "None"
+                      ? parameters.Pool ?? parameters.PoolType
+                      : null,
+                  )}
+                  ${paramRow("Age", parameters.Age ?? parameters.age)}
+                  ${paramRow("AC", parameters.AC ?? parameters.ac)}
                 </table>
               </td></tr>`
             : ""

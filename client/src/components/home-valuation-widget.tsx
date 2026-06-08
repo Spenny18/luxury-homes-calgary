@@ -46,17 +46,18 @@ interface ValuationResponse {
   estimate?: number;
   valueLow?: number;
   valueHigh?: number;
-  riskOfDecline?: number;
-  parameters?: {
-    PropertyType?: string;
-    BuildingStyle?: string;
-    Bedrooms?: number;
-    Bathrooms?: number;
-    RoomsArea?: number;
-    LotArea?: number;
-    BasementType?: string;
-    PoolType?: string;
-  };
+  /** 0..1 — higher is better. Replaces the old riskOfDecline. */
+  confidence?: number;
+  valuationSource?: "A" | "H" | "HA";
+  estimatedLease?: number;
+  leaseLow?: number;
+  leaseHigh?: number;
+  capRate?: number;
+  liquidityScore?: number;
+  // Gnowise v2 returns inferred attributes in property_attributes; field
+  // shape varies. We accept the loose shape and only surface keys we
+  // recognize.
+  parameters?: Record<string, any>;
 }
 
 interface HistoryEntry {
@@ -335,38 +336,75 @@ function HistoryRow({
           </div>
           <div className="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
             {r.parameters?.PropertyType && <span>{r.parameters.PropertyType}</span>}
-            {r.parameters?.Bedrooms != null && (
+            {(r.parameters?.Bedrooms ?? r.parameters?.bedrooms) != null && (
               <>
                 <span>·</span>
-                <span>{r.parameters.Bedrooms} bed</span>
+                <span>{r.parameters.Bedrooms ?? r.parameters.bedrooms} bed</span>
               </>
             )}
-            {r.parameters?.Bathrooms != null && (
+            {(r.parameters?.Washrooms ?? r.parameters?.Bathrooms ?? r.parameters?.washrooms) !=
+              null && (
               <>
                 <span>·</span>
-                <span>{r.parameters.Bathrooms} bath</span>
+                <span>
+                  {r.parameters.Washrooms ?? r.parameters.Bathrooms ?? r.parameters.washrooms} bath
+                </span>
               </>
             )}
-            {r.parameters?.RoomsArea != null && (
+            {(r.parameters?.RoomsArea ?? r.parameters?.rooms_area) != null && (
               <>
                 <span>·</span>
-                <span>{r.parameters.RoomsArea.toLocaleString("en-CA")} sqft</span>
+                <span>
+                  {(
+                    r.parameters.RoomsArea ?? r.parameters.rooms_area
+                  ).toLocaleString("en-CA")} sqft
+                </span>
               </>
             )}
-            {typeof r.riskOfDecline === "number" && (
+            {typeof r.confidence === "number" && (
               <>
                 <span>·</span>
                 <span className="inline-flex items-center gap-1">
-                  {r.riskOfDecline >= 60 ? (
-                    <Building2 className="w-3 h-3" strokeWidth={1.6} />
-                  ) : (
+                  {r.confidence >= 0.8 ? (
                     <Home className="w-3 h-3" strokeWidth={1.6} />
+                  ) : (
+                    <Building2 className="w-3 h-3" strokeWidth={1.6} />
                   )}
-                  {r.riskOfDecline}% risk
+                  {r.confidence >= 0.8
+                    ? "High confidence"
+                    : r.confidence >= 0.5
+                      ? "Moderate confidence"
+                      : "Lower confidence"}
                 </span>
               </>
             )}
           </div>
+          {/* Optional new-API extras: monthly rent + cap rate */}
+          {(typeof r.estimatedLease === "number" ||
+            typeof r.capRate === "number") && (
+            <div className="mt-3 flex gap-4 flex-wrap text-[11px]">
+              {typeof r.estimatedLease === "number" && (
+                <div className="inline-flex items-center gap-1.5">
+                  <span className="font-display tracking-[0.18em] text-muted-foreground uppercase">
+                    Rent est
+                  </span>
+                  <span className="tabular-nums">
+                    {formatPriceCompact(r.estimatedLease)}/mo
+                  </span>
+                </div>
+              )}
+              {typeof r.capRate === "number" && (
+                <div className="inline-flex items-center gap-1.5">
+                  <span className="font-display tracking-[0.18em] text-muted-foreground uppercase">
+                    Cap rate
+                  </span>
+                  <span className="tabular-nums">
+                    {(r.capRate * 100).toFixed(2)}%
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">

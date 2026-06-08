@@ -651,7 +651,9 @@ export async function registerRoutes(
         estimate: result.estimate,
         valueLow: result.valueLow,
         valueHigh: result.valueHigh,
-        riskOfDecline: result.riskOfDecline,
+        confidence: result.confidence,
+        estimatedLease: result.estimatedLease,
+        capRate: result.capRate,
         parameters: result.parameters,
         origin,
       });
@@ -672,8 +674,14 @@ export async function registerRoutes(
         result.valueLow != null && result.valueHigh != null
           ? `Range: $${Math.round(result.valueLow).toLocaleString("en-CA")} – $${Math.round(result.valueHigh).toLocaleString("en-CA")}`
           : "",
-        result.riskOfDecline != null
-          ? `Risk of decline: ${result.riskOfDecline}%`
+        result.confidence != null
+          ? `Confidence: ${Math.round(result.confidence * 100)}% (${result.valuationSource === "A" ? "AVM" : result.valuationSource === "H" ? "HPI" : "HPI adjusted"})`
+          : "",
+        result.estimatedLease != null
+          ? `Rent est: $${Math.round(result.estimatedLease).toLocaleString("en-CA")}/mo`
+          : "",
+        result.capRate != null
+          ? `Cap rate: ${(result.capRate * 100).toFixed(2)}%`
           : "",
       ]
         .filter(Boolean)
