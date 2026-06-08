@@ -2,21 +2,25 @@
 //
 //   Phase 1: collect contact info (name + email + phone). The "Get
 //            Estimate" button is disabled until these are valid.
-//   Phase 2: address autocomplete + run as many estimates as the visitor
-//            wants. Each estimate adds to a history list below AND sends
-//            (a) a branded HTML report email to the visitor and
-//            (b) a lead notification to Spencer with the valuation details.
-//   Phase 3 (refinement): if Gnowise's response comes back with
-//            property_attributes.RoomsArea == null, the model effectively
-//            valued an empty record. Per Gnowise support (Amir, 2026-06)
-//            this is the dominant accuracy failure mode for sparsely-
-//            indexed Calgary addresses. The row shows a "Refine for
-//            accuracy" form with the enums from §5.1–5.8 of the v2 docs;
-//            on submit we re-call /api/public/valuation (no email — the
-//            initial estimate already mailed them) with those attributes
-//            and replace the row in place. The improvement is dramatic:
-//            a $1.86M home that returned $288K on address-alone returns
-//            something realistic once we forward sqft + beds + lot.
+//   Phase 2: address autocomplete (with aerial preview) + the property
+//            details Gnowise's AVM actually needs to be accurate (sqft,
+//            beds, baths, lot, age, type — plus an optional "more details"
+//            expander for style/basement/garage/AC/pool). Submit emails
+//            the visitor a branded report AND creates a lead for Spencer.
+//
+// Why property details up front: Gnowise's address-only path returns near-
+// empty property_attributes on sparsely-indexed Calgary addresses — e.g.
+// 38 Elmont Cv SW (actual ~$1.86M) came back at $268K because the model
+// was valuing an essentially empty record. Per Gnowise support (Amir,
+// 2026-06), forwarding the documented §4 attributes brings the same home
+// back at $1.83M+ with confidence 0.94. The initial form is the right
+// place to collect those — every visitor on a luxury home eval page knows
+// their own sqft and bed count, so the friction is low and the accuracy
+// payoff is enormous.
+//
+// The refinement banner (shown only when Gnowise STILL returns thin
+// attributes after we sent them) is kept as a defence-in-depth fallback
+// and almost never fires now.
 //
 // We deliberately gate the value behind contact info — Spencer's whole
 // reason for adding this is lead capture. Each estimate is a fully-formed
@@ -32,6 +36,8 @@ import {
   CheckCircle2,
   Pencil,
   Wand2,
+  ChevronDown,
+  MapPin,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -274,11 +280,45 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
   const [selectedPlace, setSelectedPlace] = useState<PlaceSelection | null>(
     null,
   );
+  // Property-detail fields the visitor fills in alongside the address.
+  // Seeded with Calgary-luxury-appropriate defaults so they only have to
+  // touch the few fields that change per-property (sqft, beds, baths, age).
+  const [details, setDetails] = useState<RefinementFormState>(() =>
+    refinementDefaults(false),
+  );
+  const updateDetail = <K extends keyof RefinementFormState>(
+    key: K,
+    value: RefinementFormState[K],
+  ) => setDetails((d) => ({ ...d, [key]: value }));
+  const [moreDetailsOpen, setMoreDetailsOpen] = useState(false);
+  // When the visitor toggles condo on/off, flip the property-type / style /
+  // basement / garage defaults so the right enums show up in the dropdowns
+  // without forcing them to re-pick. They can still override anything.
+  const setIsCondoAndDefaults = (v: boolean) => {
+    setIsCondo(v);
+    setDetails((d) => ({
+      ...d,
+      propertyType: v ? "Condo Apt" : "Detached",
+      style: v ? "Apartment" : "2-Storey",
+      basement: v ? "" : "Finished",
+      garageType: v ? "Underground" : "Attached",
+    }));
+  };
   const [history, setHistory] = useState<HistoryEntry[]>([]);
 
-  // Initial estimate — gated, emails the visitor, creates a lead.
+  // Initial estimate — gated, emails the visitor, creates a lead. We forward
+  // every property detail field the user filled in so Gnowise has enough
+  // signal to return an accurate first-try estimate. The server's
+  // extractAttrs() drops anything blank before forwarding to the API.
   const valuation = useMutation<EmailResponse, Error>({
     mutationFn: async () => {
+      const numeric = (v: string | undefined) => {
+        if (!v || !v.trim()) return undefined;
+        const n = Number(v.replace(/,/g, ""));
+        return Number.isFinite(n) ? n : undefined;
+      };
+      const text = (v: string | undefined) =>
+        v && v.trim() ? v.trim() : undefined;
       const res = await apiRequest("POST", "/api/public/valuation/email", {
         name: contact.name.trim(),
         email: contact.email.trim(),
@@ -291,6 +331,20 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
         postalCode: selectedPlace?.postalCode,
         municipality: selectedPlace?.city,
         province: selectedPlace?.province,
+        // Property attributes (PDF §4). The blank ones get dropped server-side.
+        condition: numeric(details.condition),
+        propertyType: text(details.propertyType),
+        style: text(details.style),
+        bedrooms: numeric(details.bedrooms),
+        washrooms: numeric(details.washrooms),
+        roomsArea: numeric(details.roomsArea),
+        lotArea: numeric(details.lotArea),
+        age: text(details.age),
+        basement: text(details.basement),
+        garageType: text(details.garageType),
+        garageSpaces: numeric(details.garageSpaces),
+        ac: text(details.ac),
+        pool: text(details.pool),
       });
       return res.json();
     },
@@ -591,27 +645,48 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
                         data-testid="input-valuation-address"
                       />
                       <p className="text-[11px] text-muted-foreground">
-                        Pick from the dropdown for the best match.
+                        Start typing, then pick from the dropdown — that's
+                        how the aerial preview loads and how Gnowise gets
+                        the postal code.
                       </p>
                     </div>
 
-                    {/* Aerial preview once an address is selected — lets the
-                        user visually confirm we have the right property
-                        before they spend a Gnowise call on it. */}
-                    {selectedPlace?.lat != null &&
-                      selectedPlace?.lng != null && (
+                    {/* Aerial preview — always present so the section never
+                        disappears. Shows a labelled placeholder until the
+                        user picks from the Google Places dropdown (which is
+                        what sets lat/lng); flips to the real Static Maps
+                        image as soon as a place is selected. Lets the user
+                        visually confirm the property before they spend a
+                        Gnowise call on it. */}
+                    <div
+                      className="space-y-1.5"
+                      data-testid="map-preview-wrap"
+                    >
+                      <Label>Aerial preview</Label>
+                      {selectedPlace?.lat != null &&
+                      selectedPlace?.lng != null ? (
+                        <StaticMapPreview
+                          lat={selectedPlace.lat}
+                          lng={selectedPlace.lng}
+                          alt={`Aerial view of ${selectedPlace.formattedAddress}`}
+                        />
+                      ) : (
                         <div
-                          className="space-y-1.5"
-                          data-testid="map-preview-wrap"
+                          className="bg-secondary/40 rounded-sm border border-dashed border-border w-full flex flex-col items-center justify-center text-center px-6"
+                          style={{ aspectRatio: "600 / 280" }}
+                          data-testid="map-preview-placeholder"
                         >
-                          <Label>Confirm the property</Label>
-                          <StaticMapPreview
-                            lat={selectedPlace.lat}
-                            lng={selectedPlace.lng}
-                            alt={`Aerial view of ${selectedPlace.formattedAddress}`}
+                          <MapPin
+                            className="w-5 h-5 text-muted-foreground mb-2"
+                            strokeWidth={1.5}
                           />
+                          <p className="text-[12px] text-muted-foreground max-w-xs leading-relaxed">
+                            Pick an address from the dropdown above to see
+                            an aerial preview of the property.
+                          </p>
                         </div>
                       )}
+                    </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-4 items-end">
                       <div className="space-y-1.5">
@@ -621,7 +696,9 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
                           value={aptNum}
                           onChange={(e) => {
                             setAptNum(e.target.value);
-                            if (e.target.value.trim()) setIsCondo(true);
+                            if (e.target.value.trim() && !isCondo) {
+                              setIsCondoAndDefaults(true);
+                            }
                           }}
                           placeholder="e.g. 2104"
                           data-testid="input-valuation-unit"
@@ -630,7 +707,9 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
                       <label className="flex items-center gap-2 cursor-pointer pb-2.5">
                         <Checkbox
                           checked={isCondo}
-                          onCheckedChange={(v) => setIsCondo(!!v)}
+                          onCheckedChange={(v) =>
+                            setIsCondoAndDefaults(!!v)
+                          }
                           id="val-iscondo"
                         />
                         <span className="text-[13px] select-none">
@@ -639,9 +718,413 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
                       </label>
                     </div>
 
+                    {/* Property details — the accuracy levers. Sqft is the
+                        single biggest one per Gnowise §11 (and Amir's
+                        diagnosis of the 38 Elmont undervaluation), so we
+                        require it. Everything else is helpful but optional;
+                        the defaults are tuned to Calgary luxury detached so
+                        most visitors only touch sqft / beds / baths. */}
+                    <div className="pt-2 border-t border-border">
+                      <div className="font-display text-[10px] tracking-[0.22em] text-muted-foreground mb-3">
+                        PROPERTY DETAILS
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div className="space-y-1.5">
+                          <Label
+                            htmlFor="val-beds"
+                            className="text-[11px]"
+                          >
+                            Bedrooms
+                          </Label>
+                          <Input
+                            id="val-beds"
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            value={details.bedrooms}
+                            onChange={(e) =>
+                              updateDetail("bedrooms", e.target.value)
+                            }
+                            placeholder="4"
+                            className="h-9 text-[13px]"
+                            data-testid="input-beds"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label
+                            htmlFor="val-baths"
+                            className="text-[11px]"
+                          >
+                            Bathrooms
+                          </Label>
+                          <Input
+                            id="val-baths"
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            value={details.washrooms}
+                            onChange={(e) =>
+                              updateDetail("washrooms", e.target.value)
+                            }
+                            placeholder="4"
+                            className="h-9 text-[13px]"
+                            data-testid="input-baths"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label
+                            htmlFor="val-sqft"
+                            className="text-[11px]"
+                          >
+                            Living sqft *
+                          </Label>
+                          <Input
+                            id="val-sqft"
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            value={details.roomsArea}
+                            onChange={(e) =>
+                              updateDetail("roomsArea", e.target.value)
+                            }
+                            placeholder="3,500"
+                            className="h-9 text-[13px]"
+                            data-testid="input-sqft"
+                            required
+                          />
+                        </div>
+                        {!isCondo && (
+                          <div className="space-y-1.5">
+                            <Label
+                              htmlFor="val-lot"
+                              className="text-[11px]"
+                            >
+                              Lot sqft
+                            </Label>
+                            <Input
+                              id="val-lot"
+                              type="number"
+                              inputMode="numeric"
+                              min={0}
+                              value={details.lotArea}
+                              onChange={(e) =>
+                                updateDetail("lotArea", e.target.value)
+                              }
+                              placeholder="7,500"
+                              className="h-9 text-[13px]"
+                              data-testid="input-lot"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="space-y-1.5">
+                          <Label
+                            htmlFor="val-age"
+                            className="text-[11px]"
+                          >
+                            Year/age range
+                          </Label>
+                          <Select
+                            value={details.age}
+                            onValueChange={(v) => updateDetail("age", v)}
+                          >
+                            <SelectTrigger
+                              id="val-age"
+                              className="h-9 text-[13px]"
+                            >
+                              <SelectValue placeholder="Choose" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {AGES.map((a) => (
+                                <SelectItem key={a} value={a}>
+                                  {a === "New"
+                                    ? "New"
+                                    : a === "Unknown"
+                                      ? "Not sure"
+                                      : `${a} years`}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label
+                            htmlFor="val-type"
+                            className="text-[11px]"
+                          >
+                            Property type
+                          </Label>
+                          <Select
+                            value={details.propertyType}
+                            onValueChange={(v) =>
+                              updateDetail("propertyType", v)
+                            }
+                          >
+                            <SelectTrigger
+                              id="val-type"
+                              className="h-9 text-[13px]"
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {(isCondo
+                                ? PROPERTY_TYPES_CONDO
+                                : PROPERTY_TYPES_HOUSE
+                              ).map((p) => (
+                                <SelectItem key={p} value={p}>
+                                  {p}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label
+                            htmlFor="val-cond"
+                            className="text-[11px]"
+                          >
+                            Condition
+                          </Label>
+                          <Select
+                            value={details.condition}
+                            onValueChange={(v) =>
+                              updateDetail("condition", v)
+                            }
+                          >
+                            <SelectTrigger
+                              id="val-cond"
+                              className="h-9 text-[13px]"
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {CONDITIONS.map((c) => (
+                                <SelectItem
+                                  key={c.value}
+                                  value={c.value}
+                                >
+                                  {c.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      {/* Optional "more details" expander. These four extra
+                          fields rarely move the estimate enough to justify
+                          asking everyone for them — but a luxury buyer
+                          rebuilding a known home wants to be precise, so we
+                          let them open the panel. */}
+                      <button
+                        type="button"
+                        onClick={() => setMoreDetailsOpen((v) => !v)}
+                        className="mt-4 inline-flex items-center gap-1.5 text-[11px] tracking-wider text-muted-foreground hover:text-foreground"
+                        data-testid="button-toggle-more-details"
+                      >
+                        <ChevronDown
+                          className={`w-3.5 h-3.5 transition-transform ${moreDetailsOpen ? "rotate-180" : ""}`}
+                          strokeWidth={1.6}
+                        />
+                        {moreDetailsOpen ? "Hide" : "More"} details (style,
+                        basement, garage, AC, pool)
+                      </button>
+
+                      {moreDetailsOpen && (
+                        <div
+                          className="mt-3 space-y-3"
+                          data-testid="more-details"
+                        >
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div className="space-y-1.5">
+                              <Label
+                                htmlFor="val-style"
+                                className="text-[11px]"
+                              >
+                                Style
+                              </Label>
+                              <Select
+                                value={details.style}
+                                onValueChange={(v) =>
+                                  updateDetail("style", v)
+                                }
+                              >
+                                <SelectTrigger
+                                  id="val-style"
+                                  className="h-9 text-[13px]"
+                                >
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {(isCondo
+                                    ? STYLES_CONDO
+                                    : STYLES_HOUSE
+                                  ).map((s) => (
+                                    <SelectItem key={s} value={s}>
+                                      {s}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            {!isCondo && (
+                              <div className="space-y-1.5">
+                                <Label
+                                  htmlFor="val-bsmt"
+                                  className="text-[11px]"
+                                >
+                                  Basement
+                                </Label>
+                                <Select
+                                  value={details.basement}
+                                  onValueChange={(v) =>
+                                    updateDetail("basement", v)
+                                  }
+                                >
+                                  <SelectTrigger
+                                    id="val-bsmt"
+                                    className="h-9 text-[13px]"
+                                  >
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {BASEMENTS.map((b) => (
+                                      <SelectItem key={b} value={b}>
+                                        {b}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            )}
+                            <div className="space-y-1.5">
+                              <Label
+                                htmlFor="val-ac"
+                                className="text-[11px]"
+                              >
+                                AC
+                              </Label>
+                              <Select
+                                value={details.ac}
+                                onValueChange={(v) =>
+                                  updateDetail("ac", v)
+                                }
+                              >
+                                <SelectTrigger
+                                  id="val-ac"
+                                  className="h-9 text-[13px]"
+                                >
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {ACS.map((a) => (
+                                    <SelectItem key={a} value={a}>
+                                      {a}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div className="space-y-1.5">
+                              <Label
+                                htmlFor="val-gtype"
+                                className="text-[11px]"
+                              >
+                                Garage type
+                              </Label>
+                              <Select
+                                value={details.garageType}
+                                onValueChange={(v) =>
+                                  updateDetail("garageType", v)
+                                }
+                              >
+                                <SelectTrigger
+                                  id="val-gtype"
+                                  className="h-9 text-[13px]"
+                                >
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {GARAGES.map((g) => (
+                                    <SelectItem key={g} value={g}>
+                                      {g}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label
+                                htmlFor="val-gspaces"
+                                className="text-[11px]"
+                              >
+                                Garage spaces
+                              </Label>
+                              <Input
+                                id="val-gspaces"
+                                type="number"
+                                inputMode="numeric"
+                                min={0}
+                                max={10}
+                                value={details.garageSpaces}
+                                onChange={(e) =>
+                                  updateDetail(
+                                    "garageSpaces",
+                                    e.target.value,
+                                  )
+                                }
+                                placeholder="3"
+                                className="h-9 text-[13px]"
+                              />
+                            </div>
+                            {!isCondo && (
+                              <div className="space-y-1.5">
+                                <Label
+                                  htmlFor="val-pool"
+                                  className="text-[11px]"
+                                >
+                                  Pool
+                                </Label>
+                                <Select
+                                  value={details.pool}
+                                  onValueChange={(v) =>
+                                    updateDetail("pool", v)
+                                  }
+                                >
+                                  <SelectTrigger
+                                    id="val-pool"
+                                    className="h-9 text-[13px]"
+                                  >
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {POOLS.map((p) => (
+                                      <SelectItem key={p} value={p}>
+                                        {p}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                     <Button
                       type="submit"
-                      disabled={valuation.isPending || address.trim().length < 6}
+                      disabled={
+                        valuation.isPending ||
+                        address.trim().length < 6 ||
+                        !details.roomsArea.trim()
+                      }
                       className="w-full h-12 font-display text-[11px] tracking-[0.22em]"
                       data-testid="button-valuation-submit"
                     >
@@ -649,6 +1132,13 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
                         ? "ESTIMATING…"
                         : "GET ESTIMATE & EMAIL REPORT"}
                     </Button>
+                    {!details.roomsArea.trim() &&
+                      address.trim().length >= 6 && (
+                        <p className="text-[11px] text-muted-foreground text-center -mt-2">
+                          Add the living square footage to enable the
+                          estimate — it's the biggest accuracy lever.
+                        </p>
+                      )}
 
                     {latestFailure && (
                       <div className="border border-border bg-secondary/50 rounded-sm p-3 flex gap-2 items-start">
