@@ -27,6 +27,33 @@ export interface ValuationInput {
   municipality?: string;
   /** Optional province code (e.g. "AB"). Defaults to AB when not provided. */
   province?: string;
+  // ---- Optional refinement attributes (Gnowise §4) -----------------------
+  // Per §11 of the v2 docs: "More attributes typically narrow the confidence
+  // interval." Per Gnowise support (Amir, 2026-06): when these come back null
+  // in property_attributes the model is effectively valuing an empty record,
+  // which is why an address-only request for a $1.8M Calgary luxury home was
+  // returning $288K. Forwarding any of these the visitor knows tightens the
+  // estimate dramatically. Values are passed straight through to Gnowise as
+  // their documented PascalCase fields — enums are validated client-side
+  // against the dropdowns in the widget (see §5.1–5.8 of the PDF).
+  propertyType?: string;
+  style?: string;
+  bedrooms?: number;
+  den?: number;
+  washrooms?: number;
+  kitchens?: number;
+  parkingSpaces?: number;
+  pool?: string;
+  basement?: string;
+  roomsArea?: number;
+  lotArea?: number;
+  age?: string;
+  ac?: string;
+  garageType?: string;
+  garageSpaces?: number;
+  buildingArea?: number;
+  maintenanceFee?: number;
+  maintenanceFeeYear?: number;
 }
 
 export interface ValuationResponse {
@@ -84,6 +111,34 @@ export async function fetchValuation(
     Municipality: municipality,
   };
   if (input.postalCode) body.PostalCode = input.postalCode;
+
+  // Forward any refinement attributes the caller supplied. We only add a key
+  // when it's actually set — sending null/undefined would shadow whatever
+  // Gnowise might otherwise infer. Field names match §4 of the v2 docs
+  // exactly (PascalCase, enum values as documented in §5).
+  const maybeSet = (key: string, value: unknown) => {
+    if (value === undefined || value === null) return;
+    if (typeof value === "string" && value.trim() === "") return;
+    body[key] = value;
+  };
+  maybeSet("PropertyType", input.propertyType);
+  maybeSet("Style", input.style);
+  maybeSet("Bedrooms", input.bedrooms);
+  maybeSet("Den", input.den);
+  maybeSet("Washrooms", input.washrooms);
+  maybeSet("Kitchens", input.kitchens);
+  maybeSet("ParkingSpaces", input.parkingSpaces);
+  maybeSet("Pool", input.pool);
+  maybeSet("Basement", input.basement);
+  maybeSet("RoomsArea", input.roomsArea);
+  maybeSet("LotArea", input.lotArea);
+  maybeSet("Age", input.age);
+  maybeSet("AC", input.ac);
+  maybeSet("GarageType", input.garageType);
+  maybeSet("GarageSpaces", input.garageSpaces);
+  maybeSet("BuildingArea", input.buildingArea);
+  maybeSet("MaintenanceFee", input.maintenanceFee);
+  maybeSet("MaintenanceFeeYear", input.maintenanceFeeYear);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
@@ -146,9 +201,11 @@ export async function fetchValuation(
     // Log the matched value + source so we can tell at a glance whether
     // Gnowise found an AVM record (source "A" — usually accurate) or fell
     // back to the area HPI ("H" / "HA" — generic neighbourhood estimate).
-    // Helps diagnose "this number is too low" complaints quickly.
+    // attrs= shows how many refinement fields we passed in this call so we
+    // can compare bare-address requests vs. refined ones in the logs.
+    const attrsForwarded = Object.keys(body).length - 5; // minus Address/AptNum/Condition/Province/Municipality
     console.log(
-      `[gnowise] ${addressString} -> $${Math.round(report.gnowise_value).toLocaleString("en-CA")} (source=${report.valuation_source}, confidence=${report.valuation_confidence})`,
+      `[gnowise] ${addressString} -> $${Math.round(report.gnowise_value).toLocaleString("en-CA")} (source=${report.valuation_source}, confidence=${report.valuation_confidence}, attrs=${Math.max(0, attrsForwarded)})`,
     );
     return {
       ok: true,

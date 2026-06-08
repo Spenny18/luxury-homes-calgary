@@ -576,6 +576,44 @@ export async function registerRoutes(
     });
   });
 
+  // Pulls optional Gnowise refinement attributes out of a request body. We
+  // accept whatever the client sends and let the Gnowise proxy decide which
+  // ones to forward (it skips undefined/empty). Per Gnowise support (Amir,
+  // 2026-06): without these, the AVM is valuing an essentially empty record
+  // and can be off by an order of magnitude. The widget surfaces a refine
+  // form when the first response comes back with property_attributes.RoomsArea
+  // == null and re-submits with these fields populated.
+  const num = (v: unknown): number | undefined => {
+    if (v === null || v === undefined || v === "") return undefined;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  };
+  const str = (v: unknown): string | undefined => {
+    if (typeof v !== "string") return undefined;
+    const s = v.trim();
+    return s.length ? s : undefined;
+  };
+  const extractAttrs = (body: any) => ({
+    propertyType: str(body?.propertyType),
+    style: str(body?.style),
+    bedrooms: num(body?.bedrooms),
+    den: num(body?.den),
+    washrooms: num(body?.washrooms),
+    kitchens: num(body?.kitchens),
+    parkingSpaces: num(body?.parkingSpaces),
+    pool: str(body?.pool),
+    basement: str(body?.basement),
+    roomsArea: num(body?.roomsArea),
+    lotArea: num(body?.lotArea),
+    age: str(body?.age),
+    ac: str(body?.ac),
+    garageType: str(body?.garageType),
+    garageSpaces: num(body?.garageSpaces),
+    buildingArea: num(body?.buildingArea),
+    maintenanceFee: num(body?.maintenanceFee),
+    maintenanceFeeYear: num(body?.maintenanceFeeYear),
+  });
+
   // POST /api/public/valuation — Gnowise instant address-to-value proxy.
   // The API key never leaves the server; the browser only ever sees the
   // sanitized estimate. Rate-limited because each call costs real money.
@@ -592,9 +630,7 @@ export async function registerRoutes(
       }
       const aptNum = String(req.body?.aptNum ?? "").trim();
       const isCondo = !!req.body?.isCondo || !!aptNum;
-      const condition = Number.isFinite(Number(req.body?.condition))
-        ? Number(req.body?.condition)
-        : 3;
+      const condition = num(req.body?.condition) ?? 3;
       // Optional structured address components, when the client picked an
       // address from Google Places autocomplete instead of typing freeform.
       // Gnowise's matcher is much happier with these split out.
@@ -609,6 +645,7 @@ export async function registerRoutes(
         postalCode: postalCode || undefined,
         municipality: municipality || undefined,
         province: province || undefined,
+        ...extractAttrs(req.body),
       });
       res.json(result);
     },
@@ -643,10 +680,11 @@ export async function registerRoutes(
         address,
         aptNum: aptNum || undefined,
         isCondo,
-        condition: 3,
+        condition: num(req.body?.condition) ?? 3,
         postalCode: postalCode || undefined,
         municipality: municipality || undefined,
         province: province || undefined,
+        ...extractAttrs(req.body),
       });
       if (!result.ok || result.estimate == null) {
         return res.json({

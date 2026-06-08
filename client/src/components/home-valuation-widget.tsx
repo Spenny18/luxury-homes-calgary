@@ -6,6 +6,17 @@
 //            wants. Each estimate adds to a history list below AND sends
 //            (a) a branded HTML report email to the visitor and
 //            (b) a lead notification to Spencer with the valuation details.
+//   Phase 3 (refinement): if Gnowise's response comes back with
+//            property_attributes.RoomsArea == null, the model effectively
+//            valued an empty record. Per Gnowise support (Amir, 2026-06)
+//            this is the dominant accuracy failure mode for sparsely-
+//            indexed Calgary addresses. The row shows a "Refine for
+//            accuracy" form with the enums from §5.1–5.8 of the v2 docs;
+//            on submit we re-call /api/public/valuation (no email — the
+//            initial estimate already mailed them) with those attributes
+//            and replace the row in place. The improvement is dramatic:
+//            a $1.86M home that returned $288K on address-alone returns
+//            something realistic once we forward sqft + beds + lot.
 //
 // We deliberately gate the value behind contact info — Spencer's whole
 // reason for adding this is lead capture. Each estimate is a fully-formed
@@ -20,11 +31,19 @@ import {
   AlertTriangle,
   CheckCircle2,
   Pencil,
+  Wand2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { apiRequest } from "@/lib/queryClient";
 import { formatPrice, formatPriceCompact } from "@/lib/format";
 import {
@@ -56,12 +75,29 @@ interface EmailResponse {
   leadId?: number;
 }
 
+// Source fields needed to re-call /api/public/valuation for a given history
+// entry during refinement. Captured at the moment the initial estimate runs
+// so refinement is decoupled from whatever the address autocomplete is
+// pointing at now (the user may have entered a second address before
+// circling back to refine the first one).
+interface HistoryEntrySource {
+  address: string;
+  aptNum: string;
+  isCondo: boolean;
+  postalCode?: string;
+  municipality?: string;
+  province?: string;
+}
+
 interface HistoryEntry {
   id: string;
   displayAddress: string;
   aptNum: string;
   isCondo: boolean;
+  source: HistoryEntrySource;
   result: ValuationResponse;
+  /** Whether the refinement form is currently expanded on this row. */
+  refining: boolean;
 }
 
 interface Contact {
@@ -74,6 +110,130 @@ interface Props {
   onSeedManualForm?: (address: string, aptNum: string) => void;
 }
 
+// Gnowise enumerations (PDF §5). Forwarded straight through to the API as
+// documented values; the server passes them on without translation.
+const PROPERTY_TYPES_HOUSE = [
+  "Detached",
+  "Semi-Detached",
+  "Att/Row/Twnhouse",
+  "Duplex",
+  "Triplex",
+  "Fourplex",
+  "Multiplex",
+];
+const PROPERTY_TYPES_CONDO = [
+  "Comm Element Condo",
+  "Condo Apt",
+  "Condo Townhouse",
+];
+const STYLES_HOUSE = [
+  "1 1/2 Storey",
+  "2-Storey",
+  "2 1/2 Storey",
+  "3-Storey",
+  "Backsplit 3",
+  "Backsplit 4",
+  "Backsplit 5",
+  "Bungaloft",
+  "Bungalow",
+  "Bungalow-Raised",
+  "Sidesplit 3",
+  "Sidesplit 4",
+  "Sidesplit 5",
+  "Other",
+];
+const STYLES_CONDO = [
+  "Apartment",
+  "Bachelor/Studio",
+  "Loft",
+  "Multi-Level",
+  "Stacked Townhse",
+  "Other",
+];
+const CONDITIONS: { value: string; label: string }[] = [
+  { value: "1", label: "1 — Major repairs required" },
+  { value: "2", label: "2 — Repairs needed" },
+  { value: "3", label: "3 — Well maintained" },
+  { value: "4", label: "4 — Like new" },
+  { value: "5", label: "5 — New" },
+];
+const BASEMENTS = [
+  "Finished",
+  "Fin W/O",
+  "Part Fin",
+  "Unfinished",
+  "Apartment",
+  "Crawl Space",
+  "Full",
+  "Half",
+  "Part Bsmt",
+  "Sep Entrance",
+  "W/O",
+  "Walk-Up",
+  "Other",
+];
+const POOLS = ["None", "Inground", "Abv Grnd", "Indoor"];
+const AGES = [
+  "New",
+  "0-5",
+  "6-10",
+  "11-15",
+  "16-30",
+  "31-50",
+  "51-99",
+  "100+",
+  "Unknown",
+];
+const ACS = ["Central Air", "Window Unit", "Wall Unit", "None", "Other"];
+const GARAGES = [
+  "Attached",
+  "Detached",
+  "Built-In",
+  "Underground",
+  "Surface",
+  "Carport",
+  "None",
+  "Other",
+];
+
+// Refinement form state. Mirrors the optional attributes the server route
+// accepts; the server discards anything blank before forwarding to Gnowise.
+interface RefinementFormState {
+  propertyType: string;
+  style: string;
+  bedrooms: string;
+  washrooms: string;
+  roomsArea: string;
+  lotArea: string;
+  age: string;
+  condition: string;
+  basement: string;
+  garageType: string;
+  garageSpaces: string;
+  ac: string;
+  pool: string;
+}
+
+// Default form values. Most Calgary luxury homes are Detached / 2-Storey /
+// Well-Maintained / no pool / central air / attached garage — seeding these
+// reduces friction so the user only touches sqft, beds, baths, age, and
+// the few fields they care about.
+const refinementDefaults = (isCondo: boolean): RefinementFormState => ({
+  propertyType: isCondo ? "Condo Apt" : "Detached",
+  style: isCondo ? "Apartment" : "2-Storey",
+  bedrooms: "",
+  washrooms: "",
+  roomsArea: "",
+  lotArea: "",
+  age: "",
+  condition: "3",
+  basement: isCondo ? "" : "Finished",
+  garageType: isCondo ? "Underground" : "Attached",
+  garageSpaces: "",
+  ac: "Central Air",
+  pool: "None",
+});
+
 function isContactComplete(c: Contact): boolean {
   return (
     c.name.trim().length >= 2 &&
@@ -81,6 +241,20 @@ function isContactComplete(c: Contact): boolean {
     c.email.includes(".") &&
     c.phone.trim().length >= 7
   );
+}
+
+// Treat the result as "thin" — and worth a refinement prompt — when Gnowise
+// echoed back no living area. Amir at Gnowise flagged RoomsArea==null as
+// the canonical signal for "model had no record to value." We also fire it
+// when bedrooms+washrooms are both missing (the alternate fall-through).
+function needsRefinement(r: ValuationResponse): boolean {
+  const p = r.parameters ?? {};
+  const sqft = p.RoomsArea ?? p.rooms_area;
+  if (sqft == null) return true;
+  const beds = p.Bedrooms ?? p.bedrooms;
+  const baths = p.Washrooms ?? p.Bathrooms ?? p.washrooms;
+  if (beds == null && baths == null) return true;
+  return false;
 }
 
 export function HomeValuationWidget({ onSeedManualForm }: Props) {
@@ -102,6 +276,7 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
   );
   const [history, setHistory] = useState<HistoryEntry[]>([]);
 
+  // Initial estimate — gated, emails the visitor, creates a lead.
   const valuation = useMutation<EmailResponse, Error>({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/public/valuation/email", {
@@ -122,6 +297,9 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
     onSuccess: (envelope) => {
       const r = envelope.result;
       if (!envelope.ok || !r || !r.ok || r.estimate == null) return;
+      const sourceAddress = selectedPlace?.streetAddress
+        ? selectedPlace.streetAddress
+        : address.trim();
       setHistory((prev) => [
         {
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -132,12 +310,80 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
               : address.trim()),
           aptNum: aptNum.trim(),
           isCondo,
+          source: {
+            address: sourceAddress,
+            aptNum: aptNum.trim(),
+            isCondo: isCondo || !!aptNum.trim(),
+            postalCode: selectedPlace?.postalCode,
+            municipality: selectedPlace?.city,
+            province: selectedPlace?.province,
+          },
           result: r,
+          refining: false,
         },
         ...prev,
       ]);
     },
   });
+
+  // Refinement — re-call /api/public/valuation (no email, no second lead)
+  // with extra attributes for a specific history entry. Replaces the entry
+  // in place on success.
+  const refine = useMutation<
+    ValuationResponse,
+    Error,
+    { entryId: string; attrs: Partial<RefinementFormState> }
+  >({
+    mutationFn: async ({ entryId, attrs }) => {
+      const entry = history.find((e) => e.id === entryId);
+      if (!entry) throw new Error("That estimate is no longer in the list.");
+      const numeric = (v: string | undefined) => {
+        if (!v || !v.trim()) return undefined;
+        const n = Number(v.replace(/,/g, ""));
+        return Number.isFinite(n) ? n : undefined;
+      };
+      const text = (v: string | undefined) =>
+        v && v.trim() ? v.trim() : undefined;
+      const res = await apiRequest("POST", "/api/public/valuation", {
+        address: entry.source.address,
+        aptNum: entry.source.aptNum,
+        isCondo: entry.source.isCondo,
+        postalCode: entry.source.postalCode,
+        municipality: entry.source.municipality,
+        province: entry.source.province,
+        condition: numeric(attrs.condition),
+        propertyType: text(attrs.propertyType),
+        style: text(attrs.style),
+        bedrooms: numeric(attrs.bedrooms),
+        washrooms: numeric(attrs.washrooms),
+        roomsArea: numeric(attrs.roomsArea),
+        lotArea: numeric(attrs.lotArea),
+        age: text(attrs.age),
+        basement: text(attrs.basement),
+        garageType: text(attrs.garageType),
+        garageSpaces: numeric(attrs.garageSpaces),
+        ac: text(attrs.ac),
+        pool: text(attrs.pool),
+      });
+      return res.json();
+    },
+    onSuccess: (data, { entryId }) => {
+      if (!data?.ok || data.estimate == null) return;
+      setHistory((prev) =>
+        prev.map((e) =>
+          e.id === entryId
+            ? { ...e, result: data, refining: false }
+            : e,
+        ),
+      );
+    },
+  });
+
+  const setEntryRefining = (entryId: string, refining: boolean) => {
+    setHistory((prev) =>
+      prev.map((e) => (e.id === entryId ? { ...e, refining } : e)),
+    );
+  };
 
   const handlePlace = (p: PlaceSelection) => {
     setAddress(p.formattedAddress);
@@ -204,8 +450,8 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
                   strokeWidth={2}
                 />
                 <span>
-                  Test as many addresses as you like — your contact info is
-                  entered once
+                  Refine for accuracy by adding a few details — sqft, beds,
+                  baths — and the estimate sharpens instantly.
                 </span>
               </li>
             </ul>
@@ -457,6 +703,23 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
                   <HistoryRow
                     key={entry.id}
                     entry={entry}
+                    refining={entry.refining}
+                    onStartRefine={() => setEntryRefining(entry.id, true)}
+                    onCancelRefine={() => setEntryRefining(entry.id, false)}
+                    onSubmitRefine={(attrs) =>
+                      refine.mutate({ entryId: entry.id, attrs })
+                    }
+                    refinePending={
+                      refine.isPending &&
+                      refine.variables?.entryId === entry.id
+                    }
+                    refineError={
+                      refine.isError &&
+                      refine.variables?.entryId === entry.id
+                        ? (refine.error?.message ??
+                          "Couldn't refine. Try again or request a hand-prepared analysis.")
+                        : null
+                    }
                     onRequestManual={() => {
                       onSeedManualForm?.(
                         entry.displayAddress,
@@ -479,14 +742,29 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
 
 // ---------- History row ----------------------------------------------------
 
+interface HistoryRowProps {
+  entry: HistoryEntry;
+  refining: boolean;
+  refinePending: boolean;
+  refineError: string | null;
+  onStartRefine: () => void;
+  onCancelRefine: () => void;
+  onSubmitRefine: (attrs: Partial<RefinementFormState>) => void;
+  onRequestManual: () => void;
+}
+
 function HistoryRow({
   entry,
+  refining,
+  refinePending,
+  refineError,
+  onStartRefine,
+  onCancelRefine,
+  onSubmitRefine,
   onRequestManual,
-}: {
-  entry: HistoryEntry;
-  onRequestManual: () => void;
-}) {
+}: HistoryRowProps) {
   const r = entry.result;
+  const thin = needsRefinement(r);
   return (
     <div className="px-5 py-5">
       <div className="text-[13px] font-medium leading-tight truncate">
@@ -582,6 +860,48 @@ function HistoryRow({
           )}
         </div>
       )}
+
+      {/* Refinement: banner OR expanded form */}
+      {thin && !refining && (
+        <div className="mt-4 border border-border bg-secondary/40 rounded-sm p-4">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle
+              className="w-4 h-4 mt-0.5 shrink-0 text-foreground/70"
+              strokeWidth={1.6}
+            />
+            <div className="flex-1">
+              <div className="text-[13px] font-medium leading-tight">
+                Limited data on this address.
+              </div>
+              <p className="text-[12px] text-muted-foreground mt-1 leading-relaxed">
+                The model couldn't find a complete record — add a few details
+                and the estimate sharpens instantly.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                onClick={onStartRefine}
+                className="mt-3 font-display text-[10px] tracking-[0.22em]"
+                data-testid="button-start-refine"
+              >
+                <Wand2 className="w-3 h-3 mr-1.5" strokeWidth={1.8} />
+                ADD PROPERTY DETAILS
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {refining && (
+        <RefinementForm
+          entry={entry}
+          pending={refinePending}
+          error={refineError}
+          onCancel={onCancelRefine}
+          onSubmit={onSubmitRefine}
+        />
+      )}
+
       <div className="mt-4">
         <Button
           type="button"
@@ -594,5 +914,350 @@ function HistoryRow({
         </Button>
       </div>
     </div>
+  );
+}
+
+// ---------- Refinement form ------------------------------------------------
+
+function RefinementForm({
+  entry,
+  pending,
+  error,
+  onCancel,
+  onSubmit,
+}: {
+  entry: HistoryEntry;
+  pending: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onSubmit: (attrs: Partial<RefinementFormState>) => void;
+}) {
+  const [form, setForm] = useState<RefinementFormState>(() =>
+    refinementDefaults(entry.isCondo),
+  );
+
+  const update = <K extends keyof RefinementFormState>(
+    key: K,
+    value: RefinementFormState[K],
+  ) => setForm((f) => ({ ...f, [key]: value }));
+
+  // For luxury Calgary detached homes the sqft + beds + baths + age fields
+  // do the heavy lifting; everything else is fine on its defaults. We
+  // require sqft because that's the single biggest accuracy lever per
+  // Amir at Gnowise — without it the model is back to valuing a near-empty
+  // record.
+  const canSubmit = !pending && form.roomsArea.trim().length > 0;
+
+  const isCondo = entry.isCondo;
+  const styleOptions = isCondo ? STYLES_CONDO : STYLES_HOUSE;
+  const propertyTypeOptions = isCondo
+    ? PROPERTY_TYPES_CONDO
+    : PROPERTY_TYPES_HOUSE;
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (canSubmit) onSubmit(form);
+      }}
+      className="mt-4 border border-foreground/15 bg-secondary/30 rounded-sm p-4 lg:p-5 space-y-4"
+      data-testid="refinement-form"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="font-display text-[10px] tracking-[0.22em] text-muted-foreground">
+            REFINE FOR ACCURACY
+          </div>
+          <h4 className="font-serif text-lg mt-1 leading-tight">
+            Tell us about your home
+          </h4>
+          <p className="text-[12px] text-muted-foreground mt-1 leading-relaxed">
+            Square footage matters most. Everything else helps if you know it
+            — leave defaults otherwise.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="text-[11px] text-muted-foreground hover:text-foreground tracking-wider shrink-0"
+        >
+          Cancel
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor={`pt-${entry.id}`} className="text-[11px]">
+            Property type
+          </Label>
+          <Select
+            value={form.propertyType}
+            onValueChange={(v) => update("propertyType", v)}
+          >
+            <SelectTrigger id={`pt-${entry.id}`} className="h-9 text-[13px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {propertyTypeOptions.map((p) => (
+                <SelectItem key={p} value={p}>
+                  {p}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`st-${entry.id}`} className="text-[11px]">
+            Building style
+          </Label>
+          <Select
+            value={form.style}
+            onValueChange={(v) => update("style", v)}
+          >
+            <SelectTrigger id={`st-${entry.id}`} className="h-9 text-[13px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {styleOptions.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor={`bd-${entry.id}`} className="text-[11px]">
+            Bedrooms
+          </Label>
+          <Input
+            id={`bd-${entry.id}`}
+            type="number"
+            inputMode="numeric"
+            min={0}
+            value={form.bedrooms}
+            onChange={(e) => update("bedrooms", e.target.value)}
+            placeholder="4"
+            className="h-9 text-[13px]"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`ba-${entry.id}`} className="text-[11px]">
+            Bathrooms
+          </Label>
+          <Input
+            id={`ba-${entry.id}`}
+            type="number"
+            inputMode="numeric"
+            min={0}
+            value={form.washrooms}
+            onChange={(e) => update("washrooms", e.target.value)}
+            placeholder="4"
+            className="h-9 text-[13px]"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`sf-${entry.id}`} className="text-[11px]">
+            Living sqft *
+          </Label>
+          <Input
+            id={`sf-${entry.id}`}
+            type="number"
+            inputMode="numeric"
+            min={0}
+            value={form.roomsArea}
+            onChange={(e) => update("roomsArea", e.target.value)}
+            placeholder="3,500"
+            className="h-9 text-[13px]"
+            required
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`lt-${entry.id}`} className="text-[11px]">
+            Lot sqft
+          </Label>
+          <Input
+            id={`lt-${entry.id}`}
+            type="number"
+            inputMode="numeric"
+            min={0}
+            value={form.lotArea}
+            onChange={(e) => update("lotArea", e.target.value)}
+            placeholder="7,500"
+            className="h-9 text-[13px]"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor={`ag-${entry.id}`} className="text-[11px]">
+            Age
+          </Label>
+          <Select value={form.age} onValueChange={(v) => update("age", v)}>
+            <SelectTrigger id={`ag-${entry.id}`} className="h-9 text-[13px]">
+              <SelectValue placeholder="Choose" />
+            </SelectTrigger>
+            <SelectContent>
+              {AGES.map((a) => (
+                <SelectItem key={a} value={a}>
+                  {a}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`co-${entry.id}`} className="text-[11px]">
+            Condition
+          </Label>
+          <Select
+            value={form.condition}
+            onValueChange={(v) => update("condition", v)}
+          >
+            <SelectTrigger id={`co-${entry.id}`} className="h-9 text-[13px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CONDITIONS.map((c) => (
+                <SelectItem key={c.value} value={c.value}>
+                  {c.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {!isCondo && (
+          <div className="space-y-1.5">
+            <Label htmlFor={`bs-${entry.id}`} className="text-[11px]">
+              Basement
+            </Label>
+            <Select
+              value={form.basement}
+              onValueChange={(v) => update("basement", v)}
+            >
+              <SelectTrigger id={`bs-${entry.id}`} className="h-9 text-[13px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {BASEMENTS.map((b) => (
+                  <SelectItem key={b} value={b}>
+                    {b}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor={`gt-${entry.id}`} className="text-[11px]">
+            Garage type
+          </Label>
+          <Select
+            value={form.garageType}
+            onValueChange={(v) => update("garageType", v)}
+          >
+            <SelectTrigger id={`gt-${entry.id}`} className="h-9 text-[13px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {GARAGES.map((g) => (
+                <SelectItem key={g} value={g}>
+                  {g}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`gs-${entry.id}`} className="text-[11px]">
+            Garage spaces
+          </Label>
+          <Input
+            id={`gs-${entry.id}`}
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={10}
+            value={form.garageSpaces}
+            onChange={(e) => update("garageSpaces", e.target.value)}
+            placeholder="3"
+            className="h-9 text-[13px]"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`ac-${entry.id}`} className="text-[11px]">
+            AC
+          </Label>
+          <Select value={form.ac} onValueChange={(v) => update("ac", v)}>
+            <SelectTrigger id={`ac-${entry.id}`} className="h-9 text-[13px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ACS.map((a) => (
+                <SelectItem key={a} value={a}>
+                  {a}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {!isCondo && (
+        <div className="space-y-1.5 max-w-[200px]">
+          <Label htmlFor={`pl-${entry.id}`} className="text-[11px]">
+            Pool
+          </Label>
+          <Select value={form.pool} onValueChange={(v) => update("pool", v)}>
+            <SelectTrigger id={`pl-${entry.id}`} className="h-9 text-[13px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {POOLS.map((p) => (
+                <SelectItem key={p} value={p}>
+                  {p}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      {error && (
+        <div className="text-[12px] text-destructive leading-relaxed">
+          {error}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3 pt-1">
+        <Button
+          type="submit"
+          disabled={!canSubmit}
+          className="h-10 px-5 font-display text-[10px] tracking-[0.22em]"
+          data-testid="button-submit-refine"
+        >
+          {pending ? "RECALCULATING…" : "RECALCULATE ESTIMATE"}
+        </Button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="text-[12px] text-muted-foreground hover:text-foreground"
+        >
+          Cancel
+        </button>
+        {!form.roomsArea.trim() && (
+          <span className="text-[11px] text-muted-foreground">
+            * Living sqft is required.
+          </span>
+        )}
+      </div>
+    </form>
   );
 }
