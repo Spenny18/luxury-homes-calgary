@@ -217,6 +217,7 @@ const GARAGES = [
 // accepts; the server discards anything blank before forwarding to Gnowise.
 // `yearBuilt` is a UX-level field — the user enters a year (e.g. 2018) and
 // we bucket it to Gnowise's `Age` enum (e.g. "6-10") at submit time.
+// `histValue` / `histValueDate` are the optional §9.1 HPI-adjusted anchor.
 interface RefinementFormState {
   propertyType: string;
   style: string;
@@ -231,6 +232,8 @@ interface RefinementFormState {
   garageSpaces: string;
   ac: string;
   pool: string;
+  histValue: string;
+  histValueDate: string;
 }
 
 // Default form values. Most Calgary luxury homes are Detached / 2-Storey /
@@ -248,9 +251,16 @@ const refinementDefaults = (isCondo: boolean): RefinementFormState => ({
   condition: "3",
   basement: isCondo ? "" : "Finished",
   garageType: isCondo ? "Underground" : "Attached",
-  garageSpaces: "",
+  // Default to 2 for detached / 1 for condo. Empirically (Gnowise scenario
+  // probes on 38 Elmont Cv SW, 2026-06): leaving GarageSpaces blank treats
+  // the property as if it has no garage and shaves $400K+ off the estimate.
+  // Most Calgary luxury detached homes have ≥2 spaces, so 2 is a safer
+  // baseline than blank. Visitors who know they have a triple bump to 3.
+  garageSpaces: isCondo ? "1" : "2",
   ac: "Central Air",
   pool: "None",
+  histValue: "",
+  histValueDate: "",
 });
 
 function isContactComplete(c: Contact): boolean {
@@ -304,6 +314,7 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
     value: RefinementFormState[K],
   ) => setDetails((d) => ({ ...d, [key]: value }));
   const [moreDetailsOpen, setMoreDetailsOpen] = useState(false);
+  const [recentPurchaseOpen, setRecentPurchaseOpen] = useState(false);
   // When the visitor toggles condo on/off, flip the property-type / style /
   // basement / garage defaults so the right enums show up in the dropdowns
   // without forcing them to re-pick. They can still override anything.
@@ -358,6 +369,14 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
         garageSpaces: numeric(details.garageSpaces),
         ac: text(details.ac),
         pool: text(details.pool),
+        // §9.1 HPI-adjusted anchor. Only meaningful when histValue is set;
+        // the server's extractAttrs drops it otherwise. We pair it with
+        // the current propertyType so Gnowise has a complete anchor.
+        histValue: numeric(details.histValue),
+        histValueDate: text(details.histValueDate),
+        histPropertyType: numeric(details.histValue)
+          ? text(details.propertyType)
+          : undefined,
       });
       return res.json();
     },
@@ -431,6 +450,11 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
         garageSpaces: numeric(attrs.garageSpaces),
         ac: text(attrs.ac),
         pool: text(attrs.pool),
+        histValue: numeric(attrs.histValue),
+        histValueDate: text(attrs.histValueDate),
+        histPropertyType: numeric(attrs.histValue)
+          ? text(attrs.propertyType)
+          : undefined,
       });
       return res.json();
     },
@@ -832,7 +856,7 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
                         )}
                       </div>
 
-                      <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
                         <div className="space-y-1.5">
                           <Label
                             htmlFor="val-year"
@@ -916,6 +940,28 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
                               ))}
                             </SelectContent>
                           </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label
+                            htmlFor="val-gspaces-main"
+                            className="text-[11px]"
+                          >
+                            Garage spaces
+                          </Label>
+                          <Input
+                            id="val-gspaces-main"
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            max={10}
+                            value={details.garageSpaces}
+                            onChange={(e) =>
+                              updateDetail("garageSpaces", e.target.value)
+                            }
+                            placeholder="2"
+                            className="h-9 text-[13px]"
+                            data-testid="input-garage-spaces"
+                          />
                         </div>
                       </div>
 
@@ -1035,7 +1081,7 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
                             </div>
                           </div>
 
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div className="space-y-1.5">
                               <Label
                                 htmlFor="val-gtype"
@@ -1063,30 +1109,6 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
                                   ))}
                                 </SelectContent>
                               </Select>
-                            </div>
-                            <div className="space-y-1.5">
-                              <Label
-                                htmlFor="val-gspaces"
-                                className="text-[11px]"
-                              >
-                                Garage spaces
-                              </Label>
-                              <Input
-                                id="val-gspaces"
-                                type="number"
-                                inputMode="numeric"
-                                min={0}
-                                max={10}
-                                value={details.garageSpaces}
-                                onChange={(e) =>
-                                  updateDetail(
-                                    "garageSpaces",
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder="3"
-                                className="h-9 text-[13px]"
-                              />
                             </div>
                             {!isCondo && (
                               <div className="space-y-1.5">
@@ -1119,6 +1141,91 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
                               </div>
                             )}
                           </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Optional purchase history — PDF §9.1 HPI-adjusted
+                        anchor. When the homeowner knows when/what they
+                        paid, this is the single biggest accuracy lever in
+                        the entire form; Gnowise's response then comes back
+                        source="HA". Collapsed by default so we don't
+                        clutter the form for visitors who don't have this
+                        data. */}
+                    <div className="pt-2 border-t border-border">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setRecentPurchaseOpen((v) => !v)
+                        }
+                        className="inline-flex items-center gap-1.5 text-[11px] tracking-wider text-muted-foreground hover:text-foreground"
+                        data-testid="button-toggle-recent-purchase"
+                      >
+                        <ChevronDown
+                          className={`w-3.5 h-3.5 transition-transform ${recentPurchaseOpen ? "rotate-180" : ""}`}
+                          strokeWidth={1.6}
+                        />
+                        Recent purchase{" "}
+                        <span className="text-muted-foreground/70">
+                          (if you bought in the last 10 years — biggest
+                          accuracy boost)
+                        </span>
+                      </button>
+                      {recentPurchaseOpen && (
+                        <div
+                          className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3"
+                          data-testid="recent-purchase"
+                        >
+                          <div className="space-y-1.5">
+                            <Label
+                              htmlFor="val-histvalue"
+                              className="text-[11px]"
+                            >
+                              What did you pay? ($)
+                            </Label>
+                            <Input
+                              id="val-histvalue"
+                              type="number"
+                              inputMode="numeric"
+                              min={0}
+                              value={details.histValue}
+                              onChange={(e) =>
+                                updateDetail("histValue", e.target.value)
+                              }
+                              placeholder="1,400,000"
+                              className="h-9 text-[13px]"
+                              data-testid="input-hist-value"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label
+                              htmlFor="val-histdate"
+                              className="text-[11px]"
+                            >
+                              When did you buy?
+                            </Label>
+                            <Input
+                              id="val-histdate"
+                              type="date"
+                              value={details.histValueDate}
+                              onChange={(e) =>
+                                updateDetail(
+                                  "histValueDate",
+                                  e.target.value,
+                                )
+                              }
+                              max={`${CURRENT_YEAR}-12-31`}
+                              min="1990-01-01"
+                              className="h-9 text-[13px]"
+                              data-testid="input-hist-date"
+                            />
+                          </div>
+                          <p className="text-[11px] text-muted-foreground sm:col-span-2 leading-relaxed">
+                            Gnowise anchors the AVM against this datapoint
+                            and adjusts for the price index between then
+                            and today. Far more accurate than the model
+                            guessing in isolation.
+                          </p>
                         </div>
                       )}
                     </div>

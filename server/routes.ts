@@ -612,6 +612,9 @@ export async function registerRoutes(
     buildingArea: num(body?.buildingArea),
     maintenanceFee: num(body?.maintenanceFee),
     maintenanceFeeYear: num(body?.maintenanceFeeYear),
+    histValue: num(body?.histValue),
+    histValueDate: str(body?.histValueDate),
+    histPropertyType: str(body?.histPropertyType),
   });
 
   // POST /api/public/valuation — Gnowise instant address-to-value proxy.

@@ -54,6 +54,12 @@ export interface ValuationInput {
   buildingArea?: number;
   maintenanceFee?: number;
   maintenanceFeeYear?: number;
+  /** PDF §9.1 — anchoring the AVM against a known historical purchase
+   *  value + date. When the visitor knows what they paid, this dramatically
+   *  tightens the estimate (the response then comes back source="HA"). */
+  histValue?: number;
+  histValueDate?: string;
+  histPropertyType?: string;
 }
 
 export interface ValuationResponse {
@@ -139,6 +145,9 @@ export async function fetchValuation(
   maybeSet("BuildingArea", input.buildingArea);
   maybeSet("MaintenanceFee", input.maintenanceFee);
   maybeSet("MaintenanceFeeYear", input.maintenanceFeeYear);
+  maybeSet("HistValue", input.histValue);
+  maybeSet("HistValueDate", input.histValueDate);
+  maybeSet("HistPropertyType", input.histPropertyType);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
