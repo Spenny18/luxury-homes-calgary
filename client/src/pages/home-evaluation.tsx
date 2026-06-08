@@ -20,6 +20,7 @@ import {
   Send,
 } from "lucide-react";
 import { PublicLayout } from "@/components/public-layout";
+import { HomeValuationWidget } from "@/components/home-valuation-widget";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -403,14 +404,16 @@ export default function HomeEvaluationPage() {
         </div>
       </section>
 
-      {/* Instant algorithmic widget removed 2026-06-08: Gnowise's AVM was
-          producing severely inaccurate values for Calgary luxury homes
-          (e.g. $288K returned for a $1.86M property at source=A,
-          confidence=0.75). Schema is GTA-coded and Calgary coverage is
-          thin. The server-side proxy (server/gnowise.ts) and the
-          /api/public/valuation* routes are intentionally left in place
-          so the widget can be revived in one import + one JSX line if
-          Gnowise's Calgary coverage improves or we swap vendors. */}
+      {/* Instant valuation widget (Gnowise proxy) ------------------------ */}
+      <HomeValuationWidget
+        onSeedManualForm={(addr, unit) => {
+          // When the user clicks "request the hand-prepared analysis" we
+          // prefill the manual form's address field with whatever they just
+          // ran through the instant estimate.
+          const combined = unit ? `${addr} (Unit ${unit})` : addr;
+          form.setValue("address", combined);
+        }}
+      />
 
       {/* What you'll receive ---------------------------------------------- */}
       <section className="max-w-[1400px] mx-auto px-6 lg:px-10 py-20 lg:py-28">
