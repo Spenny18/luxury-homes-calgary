@@ -31,6 +31,7 @@ import {
   PlacesAutocomplete,
   type PlaceSelection,
 } from "@/components/places-autocomplete";
+import { StaticMapPreview } from "@/components/static-map-preview";
 
 interface ValuationResponse {
   ok: boolean;
@@ -347,6 +348,24 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
                         Pick from the dropdown for the best match.
                       </p>
                     </div>
+
+                    {/* Aerial preview once an address is selected — lets the
+                        user visually confirm we have the right property
+                        before they spend a Gnowise call on it. */}
+                    {selectedPlace?.lat != null &&
+                      selectedPlace?.lng != null && (
+                        <div
+                          className="space-y-1.5"
+                          data-testid="map-preview-wrap"
+                        >
+                          <Label>Confirm the property</Label>
+                          <StaticMapPreview
+                            lat={selectedPlace.lat}
+                            lng={selectedPlace.lng}
+                            alt={`Aerial view of ${selectedPlace.formattedAddress}`}
+                          />
+                        </div>
+                      )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-4 items-end">
                       <div className="space-y-1.5">

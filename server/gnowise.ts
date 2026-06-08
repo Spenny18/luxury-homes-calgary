@@ -61,17 +61,27 @@ export async function fetchValuation(
     };
   }
 
-  // Default Calgary/AB municipality + province so the model doesn't have to
-  // disambiguate against Toronto-area street names. When the client picked
-  // an address from Places autocomplete, it sends explicit municipality /
-  // province / postalCode parsed from address_components — those override
-  // the defaults.
+  // The v2 docs' Quick Start example sends Address with the city included
+  // ("301 Chaplin Cres Toronto") AND Municipality/Province/PostalCode as
+  // separate refining fields. We follow the same pattern: if the client
+  // sent a structured municipality and the Address string doesn't already
+  // contain it, append it so Gnowise's matcher has multiple signals to lock
+  // onto. Defaults to Calgary/AB when the client didn't supply municipality.
+  const municipality = input.municipality || "Calgary";
+  const province = input.province || "AB";
+  let addressString = input.address.trim();
+  if (
+    municipality &&
+    !addressString.toLowerCase().includes(municipality.toLowerCase())
+  ) {
+    addressString = `${addressString} ${municipality}`;
+  }
   const body: Record<string, unknown> = {
-    Address: input.address,
+    Address: addressString,
     AptNum: input.aptNum ?? null,
     Condition: input.condition ?? 3,
-    Province: input.province || "AB",
-    Municipality: input.municipality || "Calgary",
+    Province: province,
+    Municipality: municipality,
   };
   if (input.postalCode) body.PostalCode = input.postalCode;
 
@@ -133,6 +143,13 @@ export async function fetchValuation(
           "We couldn't generate an estimate for that address. Try the manual form below for a hand-prepared analysis.",
       };
     }
+    // Log the matched value + source so we can tell at a glance whether
+    // Gnowise found an AVM record (source "A" — usually accurate) or fell
+    // back to the area HPI ("H" / "HA" — generic neighbourhood estimate).
+    // Helps diagnose "this number is too low" complaints quickly.
+    console.log(
+      `[gnowise] ${addressString} -> $${Math.round(report.gnowise_value).toLocaleString("en-CA")} (source=${report.valuation_source}, confidence=${report.valuation_confidence})`,
+    );
     return {
       ok: true,
       estimate: report.gnowise_value,
