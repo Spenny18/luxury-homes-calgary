@@ -20,6 +20,7 @@ import {
   Send,
 } from "lucide-react";
 import { PublicLayout } from "@/components/public-layout";
+import { HomeValuationWidget } from "@/components/home-valuation-widget";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -184,7 +185,7 @@ export default function HomeEvaluationPage() {
             </div>
 
             {/* Form column */}
-            <div className="lg:col-span-6">
+            <div className="lg:col-span-6" id="manual-evaluation">
               <div className="bg-background/95 backdrop-blur-sm rounded-sm shadow-2xl border border-white/20 p-7 lg:p-9">
                 {submitted ? (
                   <div className="py-6 text-center" data-testid="thank-you">
@@ -402,6 +403,17 @@ export default function HomeEvaluationPage() {
           </div>
         </div>
       </section>
+
+      {/* Instant valuation widget (Gnowise proxy) ------------------------ */}
+      <HomeValuationWidget
+        onSeedManualForm={(addr, unit) => {
+          // When the user clicks "request the hand-prepared analysis" we
+          // prefill the manual form's address field with whatever they just
+          // ran through the instant estimate.
+          const combined = unit ? `${addr} (Unit ${unit})` : addr;
+          form.setValue("address", combined);
+        }}
+      />
 
       {/* What you'll receive ---------------------------------------------- */}
       <section className="max-w-[1400px] mx-auto px-6 lg:px-10 py-20 lg:py-28">

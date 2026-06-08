@@ -14,6 +14,7 @@ import { sendEmail } from "./email";
 import { pushLeadToFollowUpBoss } from "./follow-up-boss";
 import { registerAdminCmsRoutes } from "./admin-cms";
 import { fetchPoisAt } from "./pois";
+import { fetchValuation } from "./gnowise";
 
 const execFileAsync = promisify(execFile);
 
@@ -106,6 +107,13 @@ const inquiryLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 5,
   key: "inquiry",
+});
+const valuationLimiter = rateLimit({
+  // The Gnowise calls cost real money per request, so we cap aggressively.
+  // Generous per-window to allow address-correction retries but not abuse.
+  windowMs: 60 * 60 * 1000,
+  max: 20,
+  key: "valuation",
 });
 
 // Notifies Spencer of a new inquiry via Resend (replaces the old Replit-
@@ -556,6 +564,35 @@ export async function registerRoutes(
 
     res.json({ ok: true, leadId: lead.id });
   });
+
+  // POST /api/public/valuation — Gnowise instant address-to-value proxy.
+  // The API key never leaves the server; the browser only ever sees the
+  // sanitized estimate. Rate-limited because each call costs real money.
+  app.post(
+    "/api/public/valuation",
+    valuationLimiter,
+    async (req, res) => {
+      const address = String(req.body?.address ?? "").trim();
+      if (address.length < 6) {
+        return res.json({
+          ok: false,
+          message: "Please enter a valid street address (with city and postal code).",
+        });
+      }
+      const aptNum = String(req.body?.aptNum ?? "").trim();
+      const isCondo = !!req.body?.isCondo || !!aptNum;
+      const condition = Number.isFinite(Number(req.body?.condition))
+        ? Number(req.body?.condition)
+        : 3;
+      const result = await fetchValuation({
+        address,
+        aptNum: aptNum || undefined,
+        isCondo,
+        condition,
+      });
+      res.json(result);
+    },
+  );
 
   // ---------- PUBLIC MLS / MARKETING API ----------
   // GET /api/public/mls/distinct?field=subdivision|district|city|neighbourhood
