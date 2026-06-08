@@ -15,6 +15,7 @@ import { pushLeadToFollowUpBoss } from "./follow-up-boss";
 import { registerAdminCmsRoutes } from "./admin-cms";
 import { fetchPoisAt } from "./pois";
 import { fetchValuation } from "./gnowise";
+import { buildValuationEmailHtml } from "./email";
 
 const execFileAsync = promisify(execFile);
 
@@ -565,6 +566,16 @@ export async function registerRoutes(
     res.json({ ok: true, leadId: lead.id });
   });
 
+  // GET /api/public/config — runtime config the public client needs to know
+  // at boot (currently just the Google Maps API key for Places autocomplete).
+  // The key is referrer-restricted in GCP Console, so exposing it to the
+  // browser is the standard pattern.
+  app.get("/api/public/config", (_req, res) => {
+    res.json({
+      googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY ?? "",
+    });
+  });
+
   // POST /api/public/valuation — Gnowise instant address-to-value proxy.
   // The API key never leaves the server; the browser only ever sees the
   // sanitized estimate. Rate-limited because each call costs real money.
@@ -591,6 +602,122 @@ export async function registerRoutes(
         condition,
       });
       res.json(result);
+    },
+  );
+
+  // POST /api/public/valuation/email — email a previously-rendered
+  // valuation report. We deliberately recompute server-side rather than
+  // trust whatever number the client sends; the client only passes the
+  // identifying address + the recipient's contact info.
+  app.post(
+    "/api/public/valuation/email",
+    valuationLimiter,
+    async (req, res) => {
+      const name = String(req.body?.name ?? "").trim();
+      const email = String(req.body?.email ?? "").trim();
+      const phone = String(req.body?.phone ?? "").trim();
+      const address = String(req.body?.address ?? "").trim();
+      const aptNum = String(req.body?.aptNum ?? "").trim();
+      const isCondo = !!req.body?.isCondo || !!aptNum;
+      if (!email.includes("@") || address.length < 6 || name.length < 2) {
+        return res
+          .status(400)
+          .json({ ok: false, message: "Name, email, and address are required." });
+      }
+      // Recompute the valuation server-side so the email always matches
+      // what we'd serve via the inline widget.
+      const result = await fetchValuation({
+        address,
+        aptNum: aptNum || undefined,
+        isCondo,
+        condition: 3,
+      });
+      if (!result.ok || result.estimate == null) {
+        return res.json({
+          ok: false,
+          message:
+            result.message ?? "Couldn't generate an estimate for that address.",
+        });
+      }
+
+      const origin =
+        process.env.PUBLIC_ORIGIN ?? "https://riversrealestate.ca";
+      const firstName = name.split(/\s+/)[0];
+
+      // 1. Email the visitor with their valuation report.
+      const visitorHtml = buildValuationEmailHtml({
+        recipientFirstName: firstName,
+        address: aptNum ? `${address} (Unit ${aptNum})` : address,
+        estimate: result.estimate,
+        valueLow: result.valueLow,
+        valueHigh: result.valueHigh,
+        riskOfDecline: result.riskOfDecline,
+        parameters: result.parameters,
+        origin,
+      });
+      const visitorEmail = await sendEmail({
+        to: email,
+        subject: `Your instant home valuation — ${address}`,
+        html: visitorHtml,
+        replyTo: "spencer@riversrealestate.ca",
+      });
+
+      // 2. Capture the visitor as a lead so it lands in /admin/leads + the
+      //    Resend notification to Spencer + the FUB push fire.
+      const messageLines = [
+        `Instant valuation requested via /home-evaluation widget.`,
+        ``,
+        `Address: ${aptNum ? `${address} (Unit ${aptNum})` : address}`,
+        `Estimate: $${Math.round(result.estimate).toLocaleString("en-CA")}`,
+        result.valueLow != null && result.valueHigh != null
+          ? `Range: $${Math.round(result.valueLow).toLocaleString("en-CA")} – $${Math.round(result.valueHigh).toLocaleString("en-CA")}`
+          : "",
+        result.riskOfDecline != null
+          ? `Risk of decline: ${result.riskOfDecline}%`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      const lead = storage.createLead({
+        listingId: null as any,
+        name,
+        email,
+        phone: phone || (null as any),
+        message: messageLines,
+        source: "Home valuation widget",
+        status: "new",
+      } as any);
+
+      // Mirror the inquiry pipeline: notify Spencer + push to FUB.
+      sendInquiryEmail({
+        name,
+        email,
+        phone: phone || undefined,
+        message: messageLines,
+        listingTitle: "Instant home valuation",
+        listingAddress: aptNum ? `${address} (Unit ${aptNum})` : address,
+      }).then((r) => {
+        if (!r.ok) console.warn("[valuation email] spencer notify failed:", r.error);
+      });
+      pushLeadToFollowUpBoss({
+        name,
+        email,
+        phone: phone || undefined,
+        message: messageLines,
+        source: "Home valuation widget",
+      }).then((r) => {
+        if (!r.ok && !r.skipped)
+          console.warn("[valuation email] FUB push failed:", r.error);
+      });
+
+      res.json({
+        ok: visitorEmail.ok,
+        leadId: lead.id,
+        message: visitorEmail.ok
+          ? "Sent."
+          : "Couldn't deliver the email — try again or contact Spencer directly.",
+      });
     },
   );
 
