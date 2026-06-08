@@ -22,6 +22,11 @@ export interface ValuationInput {
   isCondo?: boolean;
   condition?: number;
   postalCode?: string;
+  /** Optional explicit municipality (e.g. "Calgary"). Defaults to Calgary
+   *  when not provided. */
+  municipality?: string;
+  /** Optional province code (e.g. "AB"). Defaults to AB when not provided. */
+  province?: string;
 }
 
 export interface ValuationResponse {
@@ -57,15 +62,16 @@ export async function fetchValuation(
   }
 
   // Default Calgary/AB municipality + province so the model doesn't have to
-  // disambiguate against Toronto-area street names. The visitor can still
-  // pick a non-Calgary address via Places autocomplete; the formatted_address
-  // will carry the right city + postal in the Address string itself.
+  // disambiguate against Toronto-area street names. When the client picked
+  // an address from Places autocomplete, it sends explicit municipality /
+  // province / postalCode parsed from address_components — those override
+  // the defaults.
   const body: Record<string, unknown> = {
     Address: input.address,
     AptNum: input.aptNum ?? null,
     Condition: input.condition ?? 3,
-    Province: "AB",
-    Municipality: "Calgary",
+    Province: input.province || "AB",
+    Municipality: input.municipality || "Calgary",
   };
   if (input.postalCode) body.PostalCode = input.postalCode;
 

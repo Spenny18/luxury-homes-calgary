@@ -13,6 +13,53 @@ export interface PlaceSelection {
   placeId?: string;
   lat?: number;
   lng?: number;
+  /** Street-only address (e.g. "38 Elmont Cove SW") with full street-type
+   *  spelled out, no city/province/country. Gnowise prefers this. */
+  streetAddress?: string;
+  postalCode?: string;
+  city?: string;
+  province?: string;
+}
+
+// Google Maps abbreviates street types in formatted_address ("Cove" -> "Cv",
+// "Avenue" -> "Ave"); Gnowise's address matcher does worse with the
+// abbreviated forms. Expand back to full words when we can.
+const STREET_TYPE_EXPANSIONS: Record<string, string> = {
+  Av: "Avenue",
+  Ave: "Avenue",
+  Blvd: "Boulevard",
+  Cir: "Circle",
+  Cl: "Close",
+  Cres: "Crescent",
+  Crt: "Court",
+  Ct: "Court",
+  Cv: "Cove",
+  Dr: "Drive",
+  Gdns: "Gardens",
+  Gr: "Grove",
+  Grn: "Green",
+  Hts: "Heights",
+  Hwy: "Highway",
+  Lndg: "Landing",
+  Mews: "Mews",
+  Mt: "Mount",
+  Pkwy: "Parkway",
+  Pl: "Place",
+  Pt: "Point",
+  Rd: "Road",
+  Rdg: "Ridge",
+  Rise: "Rise",
+  Sq: "Square",
+  St: "Street",
+  Terr: "Terrace",
+  Tr: "Trail",
+  Vw: "View",
+  Way: "Way",
+};
+function expandStreetType(streetAddress: string): string {
+  return streetAddress.replace(/\b([A-Z][a-z]*)\b/g, (m) => {
+    return STREET_TYPE_EXPANSIONS[m] ?? m;
+  });
 }
 
 interface Props {
@@ -62,7 +109,13 @@ export function PlacesAutocomplete({
       // a strict bounds restriction would frustrate anyone evaluating a
       // home in Canmore, Okotoks, etc.
       strictBounds: false,
-      fields: ["formatted_address", "geometry", "place_id", "name"],
+      fields: [
+        "formatted_address",
+        "address_components",
+        "geometry",
+        "place_id",
+        "name",
+      ],
     });
     ac.current = autocomplete;
 
@@ -71,11 +124,37 @@ export function PlacesAutocomplete({
       const formatted =
         place.formatted_address ?? place.name ?? inputRef.current?.value ?? "";
       onChange(formatted);
+
+      // Parse address_components into structured fields. Gnowise's matcher
+      // does much better with separate street / postal / city / province
+      // than the full formatted_address string (which Google abbreviates
+      // and suffixes with ", Canada").
+      const comps = place.address_components ?? [];
+      const get = (type: string, short = false): string | undefined => {
+        const c = comps.find((c) => c.types.includes(type));
+        return c ? (short ? c.short_name : c.long_name) : undefined;
+      };
+      const streetNumber = get("street_number");
+      const route = get("route");
+      const streetAddressRaw =
+        streetNumber && route
+          ? `${streetNumber} ${route}`
+          : route
+            ? route
+            : undefined;
+      const streetAddress = streetAddressRaw
+        ? expandStreetType(streetAddressRaw)
+        : undefined;
+
       onSelect?.({
         formattedAddress: formatted,
         placeId: place.place_id,
         lat: place.geometry?.location?.lat(),
         lng: place.geometry?.location?.lng(),
+        streetAddress,
+        postalCode: get("postal_code"),
+        city: get("locality") ?? get("sublocality") ?? get("postal_town"),
+        province: get("administrative_area_level_1", true),
       });
     });
 

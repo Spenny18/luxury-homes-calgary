@@ -595,11 +595,20 @@ export async function registerRoutes(
       const condition = Number.isFinite(Number(req.body?.condition))
         ? Number(req.body?.condition)
         : 3;
+      // Optional structured address components, when the client picked an
+      // address from Google Places autocomplete instead of typing freeform.
+      // Gnowise's matcher is much happier with these split out.
+      const postalCode = String(req.body?.postalCode ?? "").trim();
+      const municipality = String(req.body?.municipality ?? "").trim();
+      const province = String(req.body?.province ?? "").trim();
       const result = await fetchValuation({
         address,
         aptNum: aptNum || undefined,
         isCondo,
         condition,
+        postalCode: postalCode || undefined,
+        municipality: municipality || undefined,
+        province: province || undefined,
       });
       res.json(result);
     },
@@ -625,12 +634,19 @@ export async function registerRoutes(
           .json({ ok: false, message: "Name, email, and address are required." });
       }
       // Recompute the valuation server-side so the email always matches
-      // what we'd serve via the inline widget.
+      // what we'd serve via the inline widget. Pass through the structured
+      // address components when the client picked from Places autocomplete.
+      const postalCode = String(req.body?.postalCode ?? "").trim();
+      const municipality = String(req.body?.municipality ?? "").trim();
+      const province = String(req.body?.province ?? "").trim();
       const result = await fetchValuation({
         address,
         aptNum: aptNum || undefined,
         isCondo,
         condition: 3,
+        postalCode: postalCode || undefined,
+        municipality: municipality || undefined,
+        province: province || undefined,
       });
       if (!result.ok || result.estimate == null) {
         return res.json({
@@ -719,9 +735,13 @@ export async function registerRoutes(
           console.warn("[valuation email] FUB push failed:", r.error);
       });
 
+      // Return the full valuation result alongside the email-send status so
+      // the widget can render the inline estimate immediately (no second
+      // round-trip for the visible number).
       res.json({
         ok: visitorEmail.ok,
         leadId: lead.id,
+        result,
         message: visitorEmail.ok
           ? "Sent."
           : "Couldn't deliver the email — try again or contact Spencer directly.",

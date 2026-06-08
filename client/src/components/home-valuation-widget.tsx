@@ -1,14 +1,15 @@
-// Instant home valuation widget with Google Places autocomplete + inline
-// iteration history + email-the-report flow.
+// Instant home valuation widget — two-phase flow:
 //
-// UX:
-//   1. Address autocomplete (Calgary-biased) + optional unit/condo toggle.
-//   2. Submit → estimate displayed inline. Form stays visible so the user
-//      can try more addresses without losing prior results.
-//   3. "History" — every successful estimate is added to a list below.
-//   4. "Email me this report" — captures name + email + (optional) phone,
-//      sends a branded HTML report to the visitor AND posts a lead to
-//      Spencer (via the same inquiry pipeline used by the manual form).
+//   Phase 1: collect contact info (name + email + phone). The "Get
+//            Estimate" button is disabled until these are valid.
+//   Phase 2: address autocomplete + run as many estimates as the visitor
+//            wants. Each estimate adds to a history list below AND sends
+//            (a) a branded HTML report email to the visitor and
+//            (b) a lead notification to Spencer with the valuation details.
+//
+// We deliberately gate the value behind contact info — Spencer's whole
+// reason for adding this is lead capture. Each estimate is a fully-formed
+// lead with what they're evaluating + their info.
 
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
@@ -17,22 +18,13 @@ import {
   Home,
   Sparkles,
   AlertTriangle,
-  Mail,
   CheckCircle2,
-  X,
+  Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { apiRequest } from "@/lib/queryClient";
 import { formatPrice, formatPriceCompact } from "@/lib/format";
 import {
@@ -46,7 +38,6 @@ interface ValuationResponse {
   estimate?: number;
   valueLow?: number;
   valueHigh?: number;
-  /** 0..1 — higher is better. Replaces the old riskOfDecline. */
   confidence?: number;
   valuationSource?: "A" | "H" | "HA";
   estimatedLease?: number;
@@ -54,50 +45,93 @@ interface ValuationResponse {
   leaseHigh?: number;
   capRate?: number;
   liquidityScore?: number;
-  // Gnowise v2 returns inferred attributes in property_attributes; field
-  // shape varies. We accept the loose shape and only surface keys we
-  // recognize.
   parameters?: Record<string, any>;
+}
+
+interface EmailResponse {
+  ok: boolean;
+  message?: string;
+  result?: ValuationResponse;
+  leadId?: number;
 }
 
 interface HistoryEntry {
   id: string;
-  address: string;
+  displayAddress: string;
   aptNum: string;
   isCondo: boolean;
   result: ValuationResponse;
+}
+
+interface Contact {
+  name: string;
+  email: string;
+  phone: string;
 }
 
 interface Props {
   onSeedManualForm?: (address: string, aptNum: string) => void;
 }
 
+function isContactComplete(c: Contact): boolean {
+  return (
+    c.name.trim().length >= 2 &&
+    c.email.includes("@") &&
+    c.email.includes(".") &&
+    c.phone.trim().length >= 7
+  );
+}
+
 export function HomeValuationWidget({ onSeedManualForm }: Props) {
+  const [contact, setContact] = useState<Contact>({
+    name: "",
+    email: "",
+    phone: "",
+  });
+  // Once the user finishes the contact form, we collapse it to a single-line
+  // "as <Name>" badge with an Edit pencil. Lets them update if they typo'd
+  // their email without redoing the layout for every subsequent valuation.
+  const [contactLocked, setContactLocked] = useState(false);
+
   const [address, setAddress] = useState("");
   const [aptNum, setAptNum] = useState("");
   const [isCondo, setIsCondo] = useState(false);
+  const [selectedPlace, setSelectedPlace] = useState<PlaceSelection | null>(
+    null,
+  );
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [emailFor, setEmailFor] = useState<HistoryEntry | null>(null);
 
-  const valuation = useMutation<ValuationResponse, Error>({
+  const valuation = useMutation<EmailResponse, Error>({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/public/valuation", {
-        address: address.trim(),
-        aptNum: aptNum.trim() || undefined,
+      const res = await apiRequest("POST", "/api/public/valuation/email", {
+        name: contact.name.trim(),
+        email: contact.email.trim(),
+        phone: contact.phone.trim(),
+        address: selectedPlace?.streetAddress
+          ? selectedPlace.streetAddress
+          : address.trim(),
+        aptNum: aptNum.trim(),
         isCondo: isCondo || !!aptNum.trim(),
-        condition: 3,
+        postalCode: selectedPlace?.postalCode,
+        municipality: selectedPlace?.city,
+        province: selectedPlace?.province,
       });
       return res.json();
     },
-    onSuccess: (result) => {
-      if (!result.ok || result.estimate == null) return;
+    onSuccess: (envelope) => {
+      const r = envelope.result;
+      if (!envelope.ok || !r || !r.ok || r.estimate == null) return;
       setHistory((prev) => [
         {
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          address: address.trim(),
+          displayAddress:
+            selectedPlace?.formattedAddress ||
+            (aptNum.trim()
+              ? `${address.trim()} · Unit ${aptNum.trim()}`
+              : address.trim()),
           aptNum: aptNum.trim(),
           isCondo,
-          result,
+          result: r,
         },
         ...prev,
       ]);
@@ -106,10 +140,21 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
 
   const handlePlace = (p: PlaceSelection) => {
     setAddress(p.formattedAddress);
+    setSelectedPlace(p);
   };
 
+  // Surface failures inline above the address form. The mutation payload
+  // could fail because either (a) Gnowise couldn't value the address or
+  // (b) the email send itself errored — both render the same way.
+  const envelope = valuation.data;
   const latestFailure =
-    valuation.data && !valuation.data.ok ? valuation.data : null;
+    envelope &&
+    (!envelope.ok || !envelope.result?.ok)
+      ? envelope.result?.message ?? envelope.message ?? "Couldn't run that one."
+      : null;
+
+  const contactReady = isContactComplete(contact);
+  const phase: "contact" | "address" = contactLocked ? "address" : "contact";
 
   return (
     <section
@@ -133,9 +178,9 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
             </h2>
             <p className="mt-5 max-w-xl text-background/80 text-[15px] leading-relaxed">
               Powered by an automated valuation model trained on public records
-              and recent comparable sales. Test as many addresses as you'd like
-              — no email required. When you want it on file, email yourself
-              the report with one click.
+              and recent comparable sales. Each estimate is emailed directly
+              to you, and Spencer follows up personally within one business
+              hour so you can ask any questions.
             </p>
             <ul className="mt-6 space-y-2 text-background/70 text-[13px]">
               <li className="flex items-start gap-2">
@@ -150,110 +195,227 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
                   className="w-3.5 h-3.5 mt-1 shrink-0 text-background/85"
                   strokeWidth={2}
                 />
-                <span>Estimated value with likely high/low range</span>
+                <span>Estimated value, likely range, rent + cap rate</span>
               </li>
               <li className="flex items-start gap-2">
                 <CheckCircle2
                   className="w-3.5 h-3.5 mt-1 shrink-0 text-background/85"
                   strokeWidth={2}
                 />
-                <span>Property details (type, beds, baths, sqft) inferred</span>
+                <span>
+                  Test as many addresses as you like — your contact info is
+                  entered once
+                </span>
               </li>
             </ul>
           </div>
 
-          {/* Right: form (always visible) + history --------------------------- */}
+          {/* Right: form + history --------------------------------------- */}
           <div className="space-y-5">
             <div className="bg-background text-foreground rounded-sm border border-border p-7 lg:p-9 shadow-2xl">
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (!valuation.isPending && address.trim().length > 5) {
-                    valuation.mutate();
-                  }
-                }}
-                className="space-y-4"
-              >
-                <div className="space-y-1.5">
-                  <Label htmlFor="val-address">Property address</Label>
-                  <PlacesAutocomplete
-                    id="val-address"
-                    value={address}
-                    onChange={setAddress}
-                    onSelect={handlePlace}
-                    data-testid="input-valuation-address"
-                  />
-                  <p className="text-[11px] text-muted-foreground">
-                    Pick from the dropdown for the best match.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-4 items-end">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="val-unit">Unit / suite (if condo)</Label>
-                    <Input
-                      id="val-unit"
-                      value={aptNum}
-                      onChange={(e) => {
-                        setAptNum(e.target.value);
-                        if (e.target.value.trim()) setIsCondo(true);
-                      }}
-                      placeholder="e.g. 2104"
-                      data-testid="input-valuation-unit"
-                    />
-                  </div>
-                  <label className="flex items-center gap-2 cursor-pointer pb-2.5">
-                    <Checkbox
-                      checked={isCondo}
-                      onCheckedChange={(v) => setIsCondo(!!v)}
-                      id="val-iscondo"
-                    />
-                    <span className="text-[13px] select-none">
-                      It's a condo
-                    </span>
-                  </label>
-                </div>
-
-                <Button
-                  type="submit"
-                  disabled={valuation.isPending || address.trim().length < 6}
-                  className="w-full h-12 font-display text-[11px] tracking-[0.22em]"
-                  data-testid="button-valuation-submit"
+              {/* Contact info — either expanded form or collapsed badge */}
+              {phase === "contact" ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (contactReady) setContactLocked(true);
+                  }}
+                  className="space-y-4"
                 >
-                  {valuation.isPending ? "ESTIMATING…" : "GET ESTIMATE"}
-                </Button>
-
-                {latestFailure && (
-                  <div className="border border-border bg-secondary/50 rounded-sm p-3 flex gap-2 items-start">
-                    <AlertTriangle
-                      className="w-4 h-4 mt-0.5 shrink-0 text-foreground/70"
-                      strokeWidth={1.6}
-                    />
-                    <div className="flex-1 text-[13px] leading-relaxed">
-                      <div className="font-medium">Couldn't run that one.</div>
-                      <div className="text-muted-foreground mt-0.5">
-                        {latestFailure.message ??
-                          "The instant valuation didn't return a result."}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onSeedManualForm?.(address.trim(), aptNum.trim());
-                          document
-                            .getElementById("manual-evaluation")
-                            ?.scrollIntoView({ behavior: "smooth" });
-                        }}
-                        className="mt-2 font-display text-[10px] tracking-[0.22em] underline hover:no-underline"
-                      >
-                        REQUEST A MANUAL ANALYSIS INSTEAD →
-                      </button>
+                  <div>
+                    <div className="font-display text-[10px] tracking-[0.22em] text-muted-foreground mb-2">
+                      STEP 1 OF 2 — YOUR INFO
                     </div>
+                    <h3 className="font-serif text-xl leading-tight">
+                      Enter your contact info once.
+                    </h3>
+                    <p className="text-[13px] text-muted-foreground mt-1.5">
+                      Each estimate gets emailed to you, and Spencer reviews
+                      every one personally before following up.
+                    </p>
                   </div>
-                )}
-              </form>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="val-name">Your name</Label>
+                    <Input
+                      id="val-name"
+                      value={contact.name}
+                      onChange={(e) =>
+                        setContact((c) => ({ ...c, name: e.target.value }))
+                      }
+                      placeholder="First and last"
+                      data-testid="input-contact-name"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="val-email">Email</Label>
+                    <Input
+                      id="val-email"
+                      type="email"
+                      value={contact.email}
+                      onChange={(e) =>
+                        setContact((c) => ({ ...c, email: e.target.value }))
+                      }
+                      placeholder="you@example.com"
+                      data-testid="input-contact-email"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="val-phone">Phone</Label>
+                    <Input
+                      id="val-phone"
+                      type="tel"
+                      value={contact.phone}
+                      onChange={(e) =>
+                        setContact((c) => ({ ...c, phone: e.target.value }))
+                      }
+                      placeholder="(403) 555-1234"
+                      data-testid="input-contact-phone"
+                    />
+                  </div>
+
+                  <Button
+                    type="submit"
+                    disabled={!contactReady}
+                    className="w-full h-12 font-display text-[11px] tracking-[0.22em]"
+                    data-testid="button-contact-continue"
+                  >
+                    CONTINUE TO ADDRESS
+                  </Button>
+
+                  <p className="text-[11px] text-muted-foreground leading-relaxed text-center">
+                    Spencer reviews every request personally. No spam, reply
+                    to opt out anytime.
+                  </p>
+                </form>
+              ) : (
+                <>
+                  {/* Collapsed contact badge */}
+                  <div className="flex items-start justify-between gap-3 mb-5 pb-5 border-b border-border">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-display text-[10px] tracking-[0.22em] text-muted-foreground">
+                        SENDING REPORTS TO
+                      </div>
+                      <div className="text-[14px] font-medium mt-1 truncate">
+                        {contact.name}{" "}
+                        <span className="text-muted-foreground font-normal">
+                          · {contact.email}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setContactLocked(false)}
+                      className="shrink-0 text-muted-foreground hover:text-foreground"
+                      aria-label="Edit contact info"
+                    >
+                      <Pencil className="w-4 h-4" strokeWidth={1.8} />
+                    </button>
+                  </div>
+
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      if (
+                        !valuation.isPending &&
+                        address.trim().length > 5
+                      ) {
+                        valuation.mutate();
+                      }
+                    }}
+                    className="space-y-4"
+                  >
+                    <div>
+                      <div className="font-display text-[10px] tracking-[0.22em] text-muted-foreground mb-2">
+                        STEP 2 — PROPERTY ADDRESS
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="val-address">Property address</Label>
+                      <PlacesAutocomplete
+                        id="val-address"
+                        value={address}
+                        onChange={(v) => {
+                          setAddress(v);
+                          setSelectedPlace(null);
+                        }}
+                        onSelect={handlePlace}
+                        data-testid="input-valuation-address"
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        Pick from the dropdown for the best match.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-4 items-end">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="val-unit">Unit / suite (if condo)</Label>
+                        <Input
+                          id="val-unit"
+                          value={aptNum}
+                          onChange={(e) => {
+                            setAptNum(e.target.value);
+                            if (e.target.value.trim()) setIsCondo(true);
+                          }}
+                          placeholder="e.g. 2104"
+                          data-testid="input-valuation-unit"
+                        />
+                      </div>
+                      <label className="flex items-center gap-2 cursor-pointer pb-2.5">
+                        <Checkbox
+                          checked={isCondo}
+                          onCheckedChange={(v) => setIsCondo(!!v)}
+                          id="val-iscondo"
+                        />
+                        <span className="text-[13px] select-none">
+                          It's a condo
+                        </span>
+                      </label>
+                    </div>
+
+                    <Button
+                      type="submit"
+                      disabled={valuation.isPending || address.trim().length < 6}
+                      className="w-full h-12 font-display text-[11px] tracking-[0.22em]"
+                      data-testid="button-valuation-submit"
+                    >
+                      {valuation.isPending
+                        ? "ESTIMATING…"
+                        : "GET ESTIMATE & EMAIL REPORT"}
+                    </Button>
+
+                    {latestFailure && (
+                      <div className="border border-border bg-secondary/50 rounded-sm p-3 flex gap-2 items-start">
+                        <AlertTriangle
+                          className="w-4 h-4 mt-0.5 shrink-0 text-foreground/70"
+                          strokeWidth={1.6}
+                        />
+                        <div className="flex-1 text-[13px] leading-relaxed">
+                          <div className="font-medium">Couldn't run that one.</div>
+                          <div className="text-muted-foreground mt-0.5">
+                            {latestFailure}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onSeedManualForm?.(address.trim(), aptNum.trim());
+                              document
+                                .getElementById("manual-evaluation")
+                                ?.scrollIntoView({ behavior: "smooth" });
+                            }}
+                            className="mt-2 font-display text-[10px] tracking-[0.22em] underline hover:no-underline"
+                          >
+                            REQUEST A MANUAL ANALYSIS INSTEAD →
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </form>
+                </>
+              )}
             </div>
 
-            {/* History — most recent first ------------------------------- */}
             {history.length > 0 && (
               <div
                 className="bg-background/95 text-foreground rounded-sm border border-background/15 shadow-2xl divide-y divide-border"
@@ -276,9 +438,11 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
                   <HistoryRow
                     key={entry.id}
                     entry={entry}
-                    onEmail={() => setEmailFor(entry)}
                     onRequestManual={() => {
-                      onSeedManualForm?.(entry.address, entry.aptNum);
+                      onSeedManualForm?.(
+                        entry.displayAddress,
+                        entry.aptNum,
+                      );
                       document
                         .getElementById("manual-evaluation")
                         ?.scrollIntoView({ behavior: "smooth" });
@@ -290,14 +454,6 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
           </div>
         </div>
       </div>
-
-      {emailFor && (
-        <EmailReportDialog
-          entry={emailFor}
-          onClose={() => setEmailFor(null)}
-          onSent={() => setEmailFor(null)}
-        />
-      )}
     </section>
   );
 }
@@ -306,121 +462,111 @@ export function HomeValuationWidget({ onSeedManualForm }: Props) {
 
 function HistoryRow({
   entry,
-  onEmail,
   onRequestManual,
 }: {
   entry: HistoryEntry;
-  onEmail: () => void;
   onRequestManual: () => void;
 }) {
   const r = entry.result;
   return (
     <div className="px-5 py-5">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="text-[13px] font-medium leading-tight truncate">
-            {entry.aptNum ? `${entry.address} · Unit ${entry.aptNum}` : entry.address}
+      <div className="text-[13px] font-medium leading-tight truncate">
+        {entry.displayAddress}
+      </div>
+      <div className="mt-2 flex items-baseline gap-3 flex-wrap">
+        <div
+          className="font-serif text-3xl"
+          style={{ letterSpacing: "-0.01em" }}
+        >
+          {formatPrice(r.estimate!)}
+        </div>
+        {r.valueLow != null && r.valueHigh != null && (
+          <div className="text-[12px] text-muted-foreground tabular-nums">
+            {formatPriceCompact(r.valueLow)} – {formatPriceCompact(r.valueHigh)}
           </div>
-          <div className="mt-2 flex items-baseline gap-3 flex-wrap">
-            <div
-              className="font-serif text-3xl"
-              style={{ letterSpacing: "-0.01em" }}
-            >
-              {formatPrice(r.estimate!)}
+        )}
+      </div>
+      <div className="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
+        {(r.parameters?.PropertyType ?? r.parameters?.property_type) && (
+          <span>{r.parameters.PropertyType ?? r.parameters.property_type}</span>
+        )}
+        {(r.parameters?.Bedrooms ?? r.parameters?.bedrooms) != null && (
+          <>
+            <span>·</span>
+            <span>{r.parameters.Bedrooms ?? r.parameters.bedrooms} bed</span>
+          </>
+        )}
+        {(r.parameters?.Washrooms ??
+          r.parameters?.Bathrooms ??
+          r.parameters?.washrooms) != null && (
+          <>
+            <span>·</span>
+            <span>
+              {r.parameters.Washrooms ??
+                r.parameters.Bathrooms ??
+                r.parameters.washrooms}{" "}
+              bath
+            </span>
+          </>
+        )}
+        {(r.parameters?.RoomsArea ?? r.parameters?.rooms_area) != null && (
+          <>
+            <span>·</span>
+            <span>
+              {(
+                r.parameters.RoomsArea ?? r.parameters.rooms_area
+              ).toLocaleString("en-CA")}{" "}
+              sqft
+            </span>
+          </>
+        )}
+        {typeof r.confidence === "number" && (
+          <>
+            <span>·</span>
+            <span className="inline-flex items-center gap-1">
+              {r.confidence >= 0.8 ? (
+                <Home className="w-3 h-3" strokeWidth={1.6} />
+              ) : (
+                <Building2 className="w-3 h-3" strokeWidth={1.6} />
+              )}
+              {r.confidence >= 0.8
+                ? "High confidence"
+                : r.confidence >= 0.5
+                  ? "Moderate confidence"
+                  : "Lower confidence"}
+            </span>
+          </>
+        )}
+      </div>
+      {(typeof r.estimatedLease === "number" ||
+        typeof r.capRate === "number") && (
+        <div className="mt-3 flex gap-4 flex-wrap text-[11px]">
+          {typeof r.estimatedLease === "number" && (
+            <div className="inline-flex items-center gap-1.5">
+              <span className="font-display tracking-[0.18em] text-muted-foreground uppercase">
+                Rent est
+              </span>
+              <span className="tabular-nums">
+                {formatPriceCompact(r.estimatedLease)}/mo
+              </span>
             </div>
-            {r.valueLow != null && r.valueHigh != null && (
-              <div className="text-[12px] text-muted-foreground tabular-nums">
-                {formatPriceCompact(r.valueLow)} – {formatPriceCompact(r.valueHigh)}
-              </div>
-            )}
-          </div>
-          <div className="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
-            {r.parameters?.PropertyType && <span>{r.parameters.PropertyType}</span>}
-            {(r.parameters?.Bedrooms ?? r.parameters?.bedrooms) != null && (
-              <>
-                <span>·</span>
-                <span>{r.parameters.Bedrooms ?? r.parameters.bedrooms} bed</span>
-              </>
-            )}
-            {(r.parameters?.Washrooms ?? r.parameters?.Bathrooms ?? r.parameters?.washrooms) !=
-              null && (
-              <>
-                <span>·</span>
-                <span>
-                  {r.parameters.Washrooms ?? r.parameters.Bathrooms ?? r.parameters.washrooms} bath
-                </span>
-              </>
-            )}
-            {(r.parameters?.RoomsArea ?? r.parameters?.rooms_area) != null && (
-              <>
-                <span>·</span>
-                <span>
-                  {(
-                    r.parameters.RoomsArea ?? r.parameters.rooms_area
-                  ).toLocaleString("en-CA")} sqft
-                </span>
-              </>
-            )}
-            {typeof r.confidence === "number" && (
-              <>
-                <span>·</span>
-                <span className="inline-flex items-center gap-1">
-                  {r.confidence >= 0.8 ? (
-                    <Home className="w-3 h-3" strokeWidth={1.6} />
-                  ) : (
-                    <Building2 className="w-3 h-3" strokeWidth={1.6} />
-                  )}
-                  {r.confidence >= 0.8
-                    ? "High confidence"
-                    : r.confidence >= 0.5
-                      ? "Moderate confidence"
-                      : "Lower confidence"}
-                </span>
-              </>
-            )}
-          </div>
-          {/* Optional new-API extras: monthly rent + cap rate */}
-          {(typeof r.estimatedLease === "number" ||
-            typeof r.capRate === "number") && (
-            <div className="mt-3 flex gap-4 flex-wrap text-[11px]">
-              {typeof r.estimatedLease === "number" && (
-                <div className="inline-flex items-center gap-1.5">
-                  <span className="font-display tracking-[0.18em] text-muted-foreground uppercase">
-                    Rent est
-                  </span>
-                  <span className="tabular-nums">
-                    {formatPriceCompact(r.estimatedLease)}/mo
-                  </span>
-                </div>
-              )}
-              {typeof r.capRate === "number" && (
-                <div className="inline-flex items-center gap-1.5">
-                  <span className="font-display tracking-[0.18em] text-muted-foreground uppercase">
-                    Cap rate
-                  </span>
-                  <span className="tabular-nums">
-                    {(r.capRate * 100).toFixed(2)}%
-                  </span>
-                </div>
-              )}
+          )}
+          {typeof r.capRate === "number" && (
+            <div className="inline-flex items-center gap-1.5">
+              <span className="font-display tracking-[0.18em] text-muted-foreground uppercase">
+                Cap rate
+              </span>
+              <span className="tabular-nums">
+                {(r.capRate * 100).toFixed(2)}%
+              </span>
             </div>
           )}
         </div>
-      </div>
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      )}
+      <div className="mt-4">
         <Button
           type="button"
           variant="outline"
-          size="sm"
-          onClick={onEmail}
-          className="font-display text-[10px] tracking-[0.22em]"
-        >
-          <Mail className="w-3.5 h-3.5 mr-1.5" strokeWidth={1.8} />
-          EMAIL ME THIS REPORT
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
           size="sm"
           onClick={onRequestManual}
           className="font-display text-[10px] tracking-[0.22em]"
@@ -429,149 +575,5 @@ function HistoryRow({
         </Button>
       </div>
     </div>
-  );
-}
-
-// ---------- Email dialog ---------------------------------------------------
-
-function EmailReportDialog({
-  entry,
-  onClose,
-  onSent,
-}: {
-  entry: HistoryEntry;
-  onClose: () => void;
-  onSent: () => void;
-}) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-
-  const send = useMutation<{ ok: boolean; message?: string }, Error>({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/public/valuation/email", {
-        name,
-        email,
-        phone,
-        address: entry.address,
-        aptNum: entry.aptNum,
-        isCondo: entry.isCondo,
-      });
-      return res.json();
-    },
-    onSuccess: (r) => {
-      if (r.ok) {
-        setTimeout(onSent, 1500);
-      }
-    },
-  });
-
-  const sent = send.data?.ok;
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="font-serif text-2xl">
-            Email this report
-          </DialogTitle>
-          <DialogDescription className="text-[13px]">
-            {entry.aptNum ? `${entry.address} · Unit ${entry.aptNum}` : entry.address}
-            <br />
-            <span className="text-foreground font-medium">
-              {formatPrice(entry.result.estimate!)}
-            </span>
-          </DialogDescription>
-        </DialogHeader>
-
-        {sent ? (
-          <div className="py-6 text-center">
-            <CheckCircle2
-              className="w-10 h-10 mx-auto text-foreground"
-              strokeWidth={1.5}
-            />
-            <h3 className="mt-3 font-serif text-xl">Sent.</h3>
-            <p className="mt-2 text-muted-foreground text-[13px]">
-              Check your inbox for the report. Spencer's been notified too —
-              expect a follow-up within one business hour.
-            </p>
-          </div>
-        ) : (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (
-                !send.isPending &&
-                name.trim().length > 1 &&
-                email.includes("@")
-              ) {
-                send.mutate();
-              }
-            }}
-            className="space-y-3"
-          >
-            <div className="space-y-1.5">
-              <Label htmlFor="rep-name">Your name</Label>
-              <Input
-                id="rep-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="First and last"
-                autoFocus
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="rep-email">Email</Label>
-              <Input
-                id="rep-email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="rep-phone">Phone (optional)</Label>
-              <Input
-                id="rep-phone"
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="(403) 555-1234"
-              />
-            </div>
-            {send.data && !send.data.ok && (
-              <div className="text-[12px] text-destructive">
-                {send.data.message ?? "Couldn't send. Try again?"}
-              </div>
-            )}
-            <DialogFooter className="gap-2 pt-2">
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={onClose}
-                disabled={send.isPending}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={
-                  send.isPending ||
-                  name.trim().length < 2 ||
-                  !email.includes("@")
-                }
-                className="font-display text-[11px] tracking-[0.22em]"
-              >
-                {send.isPending ? "SENDING…" : "SEND REPORT"}
-              </Button>
-            </DialogFooter>
-            <p className="text-[11px] text-muted-foreground text-center leading-relaxed">
-              Spencer will see this and may follow up. Reply to opt-out anytime.
-            </p>
-          </form>
-        )}
-      </DialogContent>
-    </Dialog>
   );
 }
