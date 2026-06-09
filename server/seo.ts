@@ -106,16 +106,17 @@ function buildSitemap(): string {
   // crawlable URLs at <500 KB sitemap size — well under Google's 50K/50 MB
   // limits, so a single sitemap is fine.
   try {
+    // searchMlsListings returns { items, total } and JSON-parses gallery /
+    // features for every row. We only need mlsNumber + a date here, so the
+    // overhead per row is small enough to not bother with a dedicated
+    // sitemap query method — but if this ever climbs over ~30K rows it
+    // would be worth one.
     const limit = 20_000;
-    const rows = (storage.searchMlsListings as any)({
+    const res = (storage.searchMlsListings as any)({
       statuses: ["Active"],
       limit,
-    }) as Array<{
-      mlsNumber?: string;
-      listDate?: string | null;
-      syncedAt?: string | null;
-    }>;
-    for (const l of rows ?? []) {
+    }) as { items?: Array<{ mlsNumber?: string; listDate?: string | null; syncedAt?: string | null }> };
+    for (const l of res?.items ?? []) {
       if (!l?.mlsNumber) continue;
       urls.push({
         loc: `${HOST}/mls/${l.mlsNumber}`,
