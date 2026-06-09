@@ -97,6 +97,39 @@ function buildSitemap(): string {
     /* listing schema is in flux; skip if it errors */
   }
 
+  // Active MLS listings (the /mls/:mlsNumber pages). Each is unique content
+  // — address, photos, description, neighbourhood — and exactly what Google
+  // wants for long-tail real-estate queries like "<street> <neighbourhood>
+  // Calgary." Previously the sitemap had zero of these, so the entire MLS
+  // surface was invisible to search engines except via internal-link crawl
+  // from the homepage. With ~7k active Calgary listings this adds ~7k
+  // crawlable URLs at <500 KB sitemap size — well under Google's 50K/50 MB
+  // limits, so a single sitemap is fine.
+  try {
+    const limit = 20_000;
+    const rows = (storage.searchMlsListings as any)({
+      statuses: ["Active"],
+      limit,
+    }) as Array<{
+      mlsNumber?: string;
+      listDate?: string | null;
+      syncedAt?: string | null;
+    }>;
+    for (const l of rows ?? []) {
+      if (!l?.mlsNumber) continue;
+      urls.push({
+        loc: `${HOST}/mls/${l.mlsNumber}`,
+        // Prefer the listing's own list date (stable, marketing-meaningful);
+        // fall back to last sync time, then today.
+        lastmod: isoDate(l.listDate ?? l.syncedAt ?? today),
+        changefreq: "weekly",
+        priority: "0.5",
+      });
+    }
+  } catch (err) {
+    console.warn("[sitemap] MLS listings query failed:", err);
+  }
+
   const body = urls
     .map(
       (u) =>

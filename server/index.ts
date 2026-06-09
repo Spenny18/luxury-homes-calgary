@@ -84,6 +84,15 @@ app.use((req, res, next) => {
     res.redirect(301, "/home-evaluation");
   });
 
+  // /listings used to auto-route to a mis-placed admin component (which
+  // 500'd for unauthenticated visitors because it queries an auth-gated
+  // API and there's no error boundary). Permanently redirect to the
+  // public MLS search instead. The page file was deleted; this server
+  // route handles the URL.
+  app.get(["/listings", "/listings/"], (_req, res) => {
+    res.redirect(301, "/mls");
+  });
+
   try {
     startSyncCron();
   } catch (err) {
