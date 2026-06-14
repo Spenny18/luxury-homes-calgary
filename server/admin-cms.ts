@@ -319,4 +319,39 @@ export function registerAdminCmsRoutes(
     const ok = storage.deleteBlogPost(req.params.slug);
     res.json({ ok });
   });
+
+  // ---- Blog posts: /api/admin/blog alias ----
+  // Back-compat alias for the automated BOFU blog pipeline (Make.com), which
+  // posts to /api/admin/blog with the static ADMIN_API_TOKEN bearer. Behaves
+  // identically to the /api/admin/cms/blog routes above.
+  app.get("/api/admin/blog", requireAuth, (_req, res) => {
+    res.json(storage.listBlogPosts());
+  });
+  app.get("/api/admin/blog/:slug", requireAuth, (req, res) => {
+    const p = storage.getBlogBySlug(req.params.slug);
+    if (!p) return res.status(404).json({ message: "Not found" });
+    res.json(p);
+  });
+  app.post("/api/admin/blog", requireAuth, (req, res) => {
+    try {
+      const row = blogFromBody(req.body);
+      const saved = storage.upsertBlogPost(row as any);
+      res.json(saved);
+    } catch (err: any) {
+      res.status(400).json({ message: err?.message ?? "Invalid input" });
+    }
+  });
+  app.put("/api/admin/blog/:slug", requireAuth, (req, res) => {
+    try {
+      const row = blogFromBody({ ...req.body, slug: req.params.slug });
+      const saved = storage.upsertBlogPost(row as any);
+      res.json(saved);
+    } catch (err: any) {
+      res.status(400).json({ message: err?.message ?? "Invalid input" });
+    }
+  });
+  app.delete("/api/admin/blog/:slug", requireAuth, (req, res) => {
+    const ok = storage.deleteBlogPost(req.params.slug);
+    res.json({ ok });
+  });
 }

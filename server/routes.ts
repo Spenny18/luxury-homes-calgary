@@ -56,6 +56,17 @@ function resolveUserId(req: Request): number | null {
     if (entry && Date.now() - entry.createdAt < TOKEN_TTL_MS) {
       return entry.userId;
     }
+    // Static admin API token for automated integrations (e.g. the BOFU blog
+    // cron posting via Make.com). Unlike session tokens, this is set via the
+    // ADMIN_API_TOKEN env var and survives restarts/deploys. Resolves to the
+    // admin user identified by ADMIN_EMAIL (defaults to Spencer's login).
+    const adminToken = process.env.ADMIN_API_TOKEN;
+    if (adminToken && token === adminToken) {
+      const adminEmail =
+        process.env.ADMIN_EMAIL || "spencer@riversrealestate.ca";
+      const admin = storage.getUserByEmail(adminEmail);
+      if (admin) return admin.id;
+    }
   }
   // Fall back to session cookie (works in dev / direct origin)
   if (req.session?.userId) return req.session.userId;
