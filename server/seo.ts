@@ -149,6 +149,98 @@ Disallow: /api/
 Sitemap: ${HOST}/sitemap.xml
 `;
 
+// llms.txt — emerging convention (https://llmstxt.org) for sites to expose a
+// curated, AI-friendly index of their content. Anthropic / Perplexity /
+// others honour this for content discovery inside their tools. Format is a
+// short markdown file with H2 sections of links. We generate the
+// neighbourhood section dynamically so it stays in sync with the CMS.
+function buildLlmsTxt(): string {
+  const lines: string[] = [];
+  lines.push("# Rivers Real Estate — Luxury Homes Calgary");
+  lines.push("");
+  lines.push(
+    "> Spencer Rivers is a Calgary luxury real estate agent (Synterra Realty) specialising in inner-city and west-side communities: Springbank Hill, Aspen Woods, Upper Mount Royal, Elbow Park, Britannia, and Bel-Aire.",
+  );
+  lines.push("");
+  lines.push(
+    "Spencer holds CLHMS, CIPS, CNE, CCS, and LLS designations and is a Million Dollar Guild member. He provides hand-prepared market analyses (not algorithmic Zestimates) for sellers, and full-service buyer representation focused on $1M+ properties. Every market analysis is built personally by Spencer; typical turnaround is one business day.",
+  );
+  lines.push("");
+
+  lines.push("## Core pages");
+  lines.push("");
+  lines.push(`- [Home](${HOST}/): Spencer's overview, featured listings, and links into the rest of the site`);
+  lines.push(
+    `- [Home evaluation](${HOST}/home-evaluation): Request a hand-prepared market analysis or run an instant Gnowise-powered AVM estimate. Form gates lead capture; estimate refines via the property-details inputs.`,
+  );
+  lines.push(`- [About Spencer](${HOST}/about): Background, designations, market focus`);
+  lines.push(`- [Contact](${HOST}/contact): Phone, email, and inquiry form`);
+  lines.push("");
+
+  lines.push("## MLS search");
+  lines.push("");
+  lines.push(
+    `- [Calgary MLS search](${HOST}/mls): Searchable, filterable inventory of ~7,000 active Calgary listings. Updated daily from Pillar 9 (CREB feed).`,
+  );
+  lines.push(
+    `- Individual listing pages live at \`${HOST}/mls/<MLS-NUMBER>\` (e.g. ${HOST}/mls/A2276441).`,
+  );
+  lines.push("");
+
+  lines.push("## Focus neighbourhoods");
+  lines.push("");
+  const focus = [
+    "springbank-hill",
+    "aspen-woods",
+    "upper-mount-royal",
+    "elbow-park",
+    "britannia",
+    "bel-aire",
+  ];
+  for (const slug of focus) {
+    const label = slug
+      .split("-")
+      .map((w) => w[0].toUpperCase() + w.slice(1))
+      .join(" ");
+    lines.push(`- [${label}](${HOST}/neighbourhoods/${slug})`);
+  }
+  lines.push(`- [All neighbourhoods](${HOST}/neighbourhoods): Full directory of Calgary communities covered`);
+  lines.push("");
+
+  // Pull condo buildings dynamically — they change as Spencer adds coverage.
+  try {
+    const condos = storage.listCondoBuildings() as Array<{ slug?: string; name?: string }>;
+    if (condos.length) {
+      lines.push("## Condo buildings");
+      lines.push("");
+      for (const c of condos.slice(0, 12)) {
+        if (!c?.slug) continue;
+        lines.push(`- [${c.name ?? c.slug}](${HOST}/condos/${c.slug})`);
+      }
+      if (condos.length > 12) {
+        lines.push(`- [All condo buildings](${HOST}/condos)`);
+      }
+      lines.push("");
+    }
+  } catch {
+    /* condo schema in flux — skip silently */
+  }
+
+  lines.push("## Content");
+  lines.push("");
+  lines.push(`- [Blog](${HOST}/blog): Articles on Calgary luxury pricing strategy, seller and buyer guides, market updates`);
+  lines.push("");
+
+  lines.push("## Contact");
+  lines.push("");
+  lines.push("- Phone: +1 (403) 966-9237");
+  lines.push("- Email: spencer@riversrealestate.ca");
+  lines.push("- Brokerage: Synterra Realty, Calgary, Alberta");
+  lines.push("");
+
+  return lines.join("\n");
+}
+
 export function registerSeoRoutes(app: Express) {
   app.get("/sitemap.xml", (_req, res) => {
     res.setHeader("Content-Type", "application/xml; charset=utf-8");
@@ -160,5 +252,12 @@ export function registerSeoRoutes(app: Express) {
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=86400");
     res.send(ROBOTS);
+  });
+
+  // /llms.txt — markdown for AI crawlers. Same caching as robots.
+  app.get("/llms.txt", (_req, res) => {
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send(buildLlmsTxt());
   });
 }
