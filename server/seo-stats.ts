@@ -23,39 +23,83 @@ const SCOPES = [
   "https://www.googleapis.com/auth/analytics.readonly",
 ];
 
-let jwtClient: JWT | null = null;
-function getAuthClient(): JWT | null {
-  if (jwtClient) return jwtClient;
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-  if (!raw) return null;
-  let parsed: { client_email?: string; private_key?: string };
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
-    console.error("[seo-stats] GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON");
-    return null;
-  }
-  if (!parsed.client_email || !parsed.private_key) {
-    console.error("[seo-stats] service account JSON missing client_email or private_key");
-    return null;
-  }
-  jwtClient = new JWT({
-    email: parsed.client_email,
-    key: parsed.private_key,
-    scopes: SCOPES,
-  });
-  return jwtClient;
+interface AuthClientResult {
+  client: JWT | null;
+  error?: string;
 }
 
-async function getAccessToken(): Promise<string | null> {
-  const client = getAuthClient();
-  if (!client) return null;
+let cachedAuthResult: AuthClientResult | null = null;
+function getAuthClient(): AuthClientResult {
+  if (cachedAuthResult) return cachedAuthResult;
+  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (raw === undefined) {
+    cachedAuthResult = {
+      client: null,
+      error:
+        "GOOGLE_SERVICE_ACCOUNT_JSON env var is not set on this machine. Did `fly deploy` pick up the new secret?",
+    };
+    return cachedAuthResult;
+  }
+  if (raw.trim().length === 0) {
+    cachedAuthResult = {
+      client: null,
+      error:
+        "GOOGLE_SERVICE_ACCOUNT_JSON env var is empty. Re-set it with `fly secrets set GOOGLE_SERVICE_ACCOUNT_JSON=\"$(cat /path/to/key.json)\" -a luxury-homes-calgary` and make sure the path resolves.",
+    };
+    return cachedAuthResult;
+  }
+  let parsed: { client_email?: string; private_key?: string; type?: string };
   try {
-    const t = await client.getAccessToken();
-    return t.token ?? null;
+    parsed = JSON.parse(raw);
   } catch (err: any) {
-    console.error("[seo-stats] failed to mint access token:", err?.message ?? err);
-    return null;
+    cachedAuthResult = {
+      client: null,
+      error: `GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON (likely shell quoting mangled the newlines in private_key). Parse error: ${err?.message ?? err}. The env var is ${raw.length} chars and starts with: ${JSON.stringify(raw.slice(0, 40))}`,
+    };
+    return cachedAuthResult;
+  }
+  const missing: string[] = [];
+  if (!parsed.client_email) missing.push("client_email");
+  if (!parsed.private_key) missing.push("private_key");
+  if (missing.length > 0) {
+    cachedAuthResult = {
+      client: null,
+      error: `GOOGLE_SERVICE_ACCOUNT_JSON is JSON but missing required field(s): ${missing.join(", ")}. Keys present: ${Object.keys(parsed).join(", ")}.`,
+    };
+    return cachedAuthResult;
+  }
+  cachedAuthResult = {
+    client: new JWT({
+      email: parsed.client_email,
+      key: parsed.private_key,
+      scopes: SCOPES,
+    }),
+  };
+  return cachedAuthResult;
+}
+
+interface AccessTokenResult {
+  token: string | null;
+  error?: string;
+}
+
+async function getAccessToken(): Promise<AccessTokenResult> {
+  const auth = getAuthClient();
+  if (!auth.client) return { token: null, error: auth.error };
+  try {
+    const t = await auth.client.getAccessToken();
+    if (!t.token)
+      return {
+        token: null,
+        error:
+          "Service-account JWT exchange returned no token. The credentials may be revoked, the key may be malformed, or Google rejected the request.",
+      };
+    return { token: t.token };
+  } catch (err: any) {
+    return {
+      token: null,
+      error: `Failed to mint access token via service-account JWT: ${err?.message ?? err}`,
+    };
   }
 }
 
@@ -271,7 +315,7 @@ export async function fetchSeoStats(days: number): Promise<SeoStatsPayload> {
   const safeDays = Math.max(1, Math.min(365, Math.floor(days)));
   const range = { startDate: isoDayAgo(safeDays), endDate: isoDayAgo(1) };
 
-  const token = await getAccessToken();
+  const { token, error: tokenError } = await getAccessToken();
   const siteUrl = process.env.GSC_SITE_URL;
   const propertyId = process.env.GA4_PROPERTY_ID;
 
@@ -285,8 +329,9 @@ export async function fetchSeoStats(days: number): Promise<SeoStatsPayload> {
   };
 
   if (!token) {
-    payload.gsc.message = payload.ga4.message =
-      "GOOGLE_SERVICE_ACCOUNT_JSON missing or invalid.";
+    const msg = tokenError ?? "Authentication failed for an unknown reason.";
+    payload.gsc.message = payload.ga4.message = msg;
+    console.warn("[seo-stats] auth failed:", msg);
     return payload;
   }
 
