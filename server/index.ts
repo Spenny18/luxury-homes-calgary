@@ -32,6 +32,23 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
+// Canonicalise www -> apex. Fly.io serves the same Node process for both
+// riversrealestate.ca and www.riversrealestate.ca, which means Google was
+// indexing two URL variants with identical 200 HTML for every page — classic
+// duplicate-content footgun. Forward every www.* request to the apex with
+// a 301 so search engines consolidate authority on a single canonical host.
+// Local dev hosts (localhost, *.fly.dev) aren't affected because the check
+// is anchored to the exact "www.riversrealestate.ca" string.
+app.use((req, res, next) => {
+  if (req.hostname === "www.riversrealestate.ca") {
+    return res.redirect(
+      301,
+      `https://riversrealestate.ca${req.originalUrl}`,
+    );
+  }
+  next();
+});
+
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
