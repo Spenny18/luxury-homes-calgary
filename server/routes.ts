@@ -1533,6 +1533,24 @@ out center tags;`;
   });
 
   // ---------- ANALYTICS (auth) ----------
+  // GA4 + Google Search Console reporting for /admin/analytics. Reads via
+  // service-account JWT (Fly secret GOOGLE_SERVICE_ACCOUNT_JSON). Cached
+  // 1h in seo-stats.ts so the page is snappy without burning API quota.
+  app.get("/api/analytics/seo-stats", requireAuth, async (req, res) => {
+    const days = Number(req.query.days);
+    const safeDays = Number.isFinite(days) && days > 0 ? days : 28;
+    try {
+      const { fetchSeoStats } = await import("./seo-stats");
+      const payload = await fetchSeoStats(safeDays);
+      res.json(payload);
+    } catch (err: any) {
+      console.error("[seo-stats] route error:", err?.message ?? err);
+      res
+        .status(500)
+        .json({ ok: false, message: err?.message ?? "seo-stats failed" });
+    }
+  });
+
   // Lightweight read-only analytics derived from existing tables.
   app.get("/api/analytics/summary", requireAuth, (_req, res) => {
     const allListings = storage.listListings();
