@@ -8,6 +8,14 @@ import { sitewideGraph, jsonLdScriptHtml } from "@/lib/schema";
 // load on every route (public + /mls + /admin).
 const FUB_PIXEL_SRC = `(function(w,i,d,g,e,t){w["WidgetTrackerObject"]=g;(w[g]=w[g]||function() {(w[g].q=w[g].q||[]).push(arguments);}),(w[g].ds=1*new Date());(e="script"), (t=d.createElement(e)),(e=d.getElementsByTagName(e)[0]);t.async=1;t.src=i; e.parentNode.insertBefore(t,e);}) (window,"https://widgetbe.com/agent",document,"widgetTracker"); window.widgetTracker("create", "WT-GFURXFCK"); window.widgetTracker("send", "pageview");`;
 
+// Google Analytics 4 (measurement ID G-TDK5S696RM). Counts pageviews,
+// users, sessions, traffic sources, conversions. Sends one auto pageview
+// per page load. The backend dashboard queries this same property via
+// the GA4 Data API (in server/seo-stats.ts) so admins can see traffic
+// numbers without leaving /admin.
+const GA4_MEASUREMENT_ID = "G-TDK5S696RM";
+const GA4_INLINE = `window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date()); gtag('config', '${GA4_MEASUREMENT_ID}');`;
+
 // Sitewide Schema.org graph (Organization/RealEstateAgent, Person, WebSite,
 // Logo). Serialised once at module load — the contents don't depend on
 // pageContext. Per-route +Head.tsx adds page-specific @types on top.
@@ -37,6 +45,11 @@ export default function HeadDefault() {
         rel="stylesheet"
       />
       <script dangerouslySetInnerHTML={{ __html: FUB_PIXEL_SRC }} />
+      <script
+        async
+        src={`https://www.googletagmanager.com/gtag/js?id=${GA4_MEASUREMENT_ID}`}
+      />
+      <script dangerouslySetInnerHTML={{ __html: GA4_INLINE }} />
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: SITEWIDE_JSONLD }}
