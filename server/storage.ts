@@ -1221,16 +1221,21 @@ export class DatabaseStorage implements IStorage {
       db.update(neighbourhoods).set({ activeCount: Number(c?.c ?? 0) }).where(eq(neighbourhoods.slug, n.slug)).run();
     }
   }
-  // Re-derive each active listing's neighbourhood from its stored subdivision
-  // via `resolve`. Returns the number of rows changed. One transaction so a
-  // few thousand updates commit in a single fsync.
+  // Re-derive each active listing's neighbourhood via `resolve` (which sees the
+  // stored subdivision and street address). Returns the number of rows changed.
+  // One transaction so a few thousand updates commit in a single fsync.
   retagMlsBySubdivision(
-    resolve: (subdivision: string | null) => string | undefined,
+    resolve: (row: {
+      subdivision: string | null;
+      fullAddress: string;
+      neighbourhood: string | null;
+    }) => string | undefined,
   ): number {
     const rows = db
       .select({
         id: mlsListings.id,
         subdivision: mlsListings.subdivision,
+        fullAddress: mlsListings.fullAddress,
         neighbourhood: mlsListings.neighbourhood,
       })
       .from(mlsListings)
@@ -1239,7 +1244,7 @@ export class DatabaseStorage implements IStorage {
     let updated = 0;
     db.transaction((tx) => {
       for (const r of rows) {
-        const next = resolve(r.subdivision);
+        const next = resolve(r);
         if (next && next !== r.neighbourhood) {
           tx.update(mlsListings)
             .set({ neighbourhood: next })

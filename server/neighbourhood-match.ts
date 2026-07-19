@@ -41,6 +41,45 @@ const SUBDIVISION_ALIASES: Array<[RegExp, string]> = [
   [/bearspaw/i, "Bearspaw"],
 ];
 
+// Street-address rules for communities CREB's SubdivisionName can't isolate.
+// These are intentionally narrower than a subdivision match, so they take
+// priority over it (see the resolver in rets-sync).
+//
+// - Varsity Estates: only homes on a "Varsity Estates …" street (Drive, Road,
+//   Close, Villas, etc.) — not the whole Varsity subdivision.
+// - Chestermere (Lakefront): only true lakefront civic addresses — odd numbers
+//   on East Chestermere Drive, even numbers on West Chestermere Drive, and
+//   every 4th number from 97–257 on Cove Road.
+export function matchAddressRule(
+  fullAddress: string | null | undefined,
+): string | undefined {
+  if (!fullAddress) return undefined;
+  const lower = fullAddress.toLowerCase();
+
+  if (/varsity\s+estates/.test(lower)) return "Varsity Estates";
+
+  // Leading civic number + street (before the first comma).
+  const m = fullAddress.match(/(\d+)\s+([^,]+)/);
+  if (m) {
+    const num = parseInt(m[1], 10);
+    const street = m[2].toLowerCase();
+    const onChestermereDr = /chestermere\s+dr(ive)?\b/.test(street);
+    if (onChestermereDr && /\beast\b/.test(street) && num % 2 === 1)
+      return "Chestermere (Lakefront)";
+    if (onChestermereDr && /\bwest\b/.test(street) && num % 2 === 0)
+      return "Chestermere (Lakefront)";
+    if (
+      /\bcove\s+r(oa)?d\b/.test(street) &&
+      lower.includes("chestermere") &&
+      num >= 97 &&
+      num <= 257 &&
+      (num - 97) % 4 === 0
+    )
+      return "Chestermere (Lakefront)";
+  }
+  return undefined;
+}
+
 // Resolve a CREB SubdivisionName to one of our neighbourhood names, or
 // undefined if it isn't one we have a page for. Tries the whole label first,
 // then each slash/comma-separated part (CREB uses "Community/Subarea"), then

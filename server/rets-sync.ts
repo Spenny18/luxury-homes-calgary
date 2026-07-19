@@ -17,6 +17,7 @@ import type { InsertMlsListing } from "@shared/schema";
 import {
   buildSubdivisionMap,
   matchSubdivision,
+  matchAddressRule,
 } from "./neighbourhood-match";
 
 // Normalised subdivision → neighbourhood lookup, (re)built at the start of each
@@ -56,10 +57,11 @@ function normalizeListing(row: Record<string, string>): InsertMlsListing | null 
   const baths = row.BathroomsTotalInteger ? parseInt(row.BathroomsTotalInteger, 10) : 0;
   const yearBuilt = row.YearBuilt ? parseInt(row.YearBuilt, 10) : null;
   const photoCount = row.PhotosCount ? parseInt(row.PhotosCount, 10) : 0;
-  // Prefer CREB's SubdivisionName (covers all 72 communities); fall back to the
-  // remarks/address regex hints for the handful of listings whose subdivision
-  // doesn't map to one of our pages.
+  // Address rules win (they isolate a subset of a subdivision, e.g. Varsity
+  // Estates streets or the Chestermere lakefront), then CREB's SubdivisionName
+  // (covers all 72 communities), then the remarks/address regex hints.
   const neighbourhood =
+    matchAddressRule(row.UnparsedAddress) ??
     matchSubdivision(row.SubdivisionName, subdivisionMap) ??
     inferNeighbourhood(
       row.SubdivisionName,
@@ -342,8 +344,10 @@ export async function runSync(): Promise<{
 // Idempotent: once a listing carries the right neighbourhood, nothing changes.
 export function backfillMlsNeighbourhoods(): void {
   const map = buildSubdivisionMap(storage.listNeighbourhoods());
-  const updated = storage.retagMlsBySubdivision((subdivision) =>
-    matchSubdivision(subdivision, map),
+  const updated = storage.retagMlsBySubdivision(
+    (row) =>
+      matchAddressRule(row.fullAddress) ??
+      matchSubdivision(row.subdivision, map),
   );
   if (updated > 0) storage.refreshNeighbourhoodActiveCounts();
   console.log(`[mls-retag] re-tagged ${updated} listings by subdivision`);
