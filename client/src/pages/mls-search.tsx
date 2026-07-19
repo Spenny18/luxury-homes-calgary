@@ -102,6 +102,7 @@ interface Filters {
   views: string;
   subdivisions: string; // free-text csv (substring match)
   districts: string; // free-text csv
+  neighbourhood: string; // a Rivers community name — exact match on mls_listings.neighbourhood
   condoFeeMax: string;
   keywords: string;
   statuses: string; // multi (csv)
@@ -150,6 +151,7 @@ const DEFAULT_FILTERS: Filters = {
   views: "",
   subdivisions: "",
   districts: "",
+  neighbourhood: "",
   condoFeeMax: "",
   keywords: "",
   statuses: "Active",
@@ -372,7 +374,7 @@ function parseQuery(qs: string): Partial<Filters> {
     "basements", "basementDevelopments", "parkingFeatures", "lotFeatures",
     "laundryFeatures", "appliances", "levels", "structureTypes",
     "architecturalStyles", "accessibilityFeatures", "associationAmenities",
-    "views", "subdivisions", "districts", "condoFeeMax", "keywords", "statuses", "sort",
+    "views", "subdivisions", "districts", "neighbourhood", "condoFeeMax", "keywords", "statuses", "sort",
   ];
   for (const k of map) {
     const v = params.get(k);
@@ -529,10 +531,19 @@ function FitBoundsOnce({ points }: { points: Array<[number, number]> }) {
 export default function MlsSearchPage() {
   const [location, setLocation] = useLocation();
   const initialFilters = useMemo<Filters>(() => {
+    const search = typeof window !== "undefined" ? window.location.search : "";
     const hash = typeof window !== "undefined" ? window.location.hash : "";
     const qIdx = hash.indexOf("?");
-    const qs = qIdx >= 0 ? hash.slice(qIdx + 1) : "";
-    return { ...DEFAULT_FILTERS, ...parseQuery(qs) };
+    const hashQs = qIdx >= 0 ? hash.slice(qIdx + 1) : "";
+    // Accept filters from either the query string (?key=val, used by the
+    // "See all" links on neighbourhood pages) or the hash. Query string wins.
+    const parsed = { ...parseQuery(hashQs), ...parseQuery(search) };
+    const base = { ...DEFAULT_FILTERS, ...parsed };
+    // A neighbourhood filter is community-specific and may sit outside Calgary
+    // (Bearspaw, Chestermere, Airdrie, Canmore…). When it's set without an
+    // explicit city, drop the default Calgary constraint so those listings show.
+    if (parsed.neighbourhood && parsed.cities === undefined) base.cities = "";
+    return base;
   }, []);
 
   const [filters, setFilters] = useState<Filters>(initialFilters);
@@ -603,6 +614,7 @@ export default function MlsSearchPage() {
     if (filters.views) p.set("views", filters.views);
     if (filters.subdivisions) p.set("subdivisions", filters.subdivisions);
     if (filters.districts) p.set("districts", filters.districts);
+    if (filters.neighbourhood) p.set("neighbourhood", filters.neighbourhood);
     if (filters.condoFeeMax) p.set("condoFeeMax", filters.condoFeeMax);
     if (filters.keywords) p.set("keywords", filters.keywords);
     if (filters.statuses) p.set("statuses", filters.statuses);
@@ -672,6 +684,7 @@ export default function MlsSearchPage() {
     if (filters.views) n++;
     if (filters.subdivisions) n++;
     if (filters.districts) n++;
+    if (filters.neighbourhood) n++;
     if (filters.condoFeeMax) n++;
     if (filters.keywords) n++;
     if (filters.statuses && filters.statuses !== "Active") n++;
@@ -1243,6 +1256,29 @@ export default function MlsSearchPage() {
 
                   {/* LOCATION */}
                   <FilterSection title="Location">
+                    <FilterRow label="Neighbourhood">
+                      <Select
+                        value={filters.neighbourhood || "__all__"}
+                        onValueChange={(v) =>
+                          updateFilter("neighbourhood", v === "__all__" ? "" : v)
+                        }
+                      >
+                        <SelectTrigger
+                          className="h-11 rounded-md text-[14px]"
+                          data-testid="select-neighbourhood"
+                        >
+                          <SelectValue placeholder="All neighbourhoods" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__all__">All neighbourhoods</SelectItem>
+                          {(neighbourhoods ?? []).map((n) => (
+                            <SelectItem key={n.slug} value={n.name}>
+                              {n.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FilterRow>
                     <FilterRow label="Cities (multi-select)">
                       <CheckboxGroup
                         options={CITY_OPTS}
