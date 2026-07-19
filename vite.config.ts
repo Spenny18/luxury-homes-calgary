@@ -16,8 +16,10 @@ export default defineConfig({
     },
   },
   // Vike owns the HTML rendering, so the project root (not client/) is the
-  // Vite root. We keep the same output directory the rest of the pipeline
-  // already expects.
+  // Vite root. Static files under client/public (e.g. /img/neighbourhoods/*)
+  // are copied verbatim into the build output and served at the site root.
+  publicDir: path.resolve(import.meta.dirname, "client", "public"),
+  // We keep the same output directory the rest of the pipeline already expects.
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/client"),
     emptyOutDir: true,

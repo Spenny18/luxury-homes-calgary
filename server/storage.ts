@@ -469,6 +469,7 @@ try {
       ["quadrant", "TEXT NOT NULL DEFAULT 'city-centre'"],
       ["borders", "TEXT NOT NULL DEFAULT '{}'"],
       ["schools", "TEXT NOT NULL DEFAULT '[]'"],
+      ["hero_credit", "TEXT NOT NULL DEFAULT ''"],
       // Cached GeoJSON polygon (Polygon or MultiPolygon geometry) fetched
       // from OSM Nominatim. NULL means "not fetched yet"; '""' means "fetched
       // but no match" — distinguished so we don't refetch known-misses.

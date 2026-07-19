@@ -311,6 +311,9 @@ export const neighbourhoods = sqliteTable("neighbourhoods", {
   // Schools list — JSON array of {name, level, area, url}
   schools: text("schools").notNull().default("[]"),
   heroImage: text("hero_image").notNull(),
+  // Attribution for the hero image (CC-licensed photos). JSON:
+  // {author, authorUrl, license, licenseUrl, sourceUrl}. Empty for owned/stock.
+  heroCredit: text("hero_credit").notNull().default(""),
   gallery: text("gallery").notNull().default("[]"),
   centerLat: real("center_lat").notNull(),
   centerLng: real("center_lng").notNull(),

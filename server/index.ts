@@ -110,6 +110,16 @@ app.use((req, res, next) => {
     console.error("[mls-retag] failed:", err);
   }
 
+  // Swap curated CC-licensed hero photos in for the old stock/AI images.
+  try {
+    const { applyNeighbourhoodImages } = await import(
+      "./neighbourhood-images"
+    );
+    applyNeighbourhoodImages();
+  } catch (err) {
+    console.error("[nb-images] import failed:", err);
+  }
+
   // SEO endpoints — must be registered before the Vike catch-all below so
   // /sitemap.xml and /robots.txt don't fall through to Vike's "no page
   // matched" error renderer.

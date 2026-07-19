@@ -95,6 +95,19 @@ export default function NeighbourhoodDetailPage() {
             <Stat label="Community" value={data.name} />
           </div>
         </div>
+        {(data as any).heroCredit?.sourceUrl && (
+          <a
+            href={(data as any).heroCredit.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer nofollow"
+            className="absolute bottom-2 right-3 z-10 text-[10px] tracking-wide text-white/45 hover:text-white/75 transition-colors"
+            data-testid="hero-credit"
+          >
+            Photo: {String((data as any).heroCredit.author).split(",")[0]}
+            {" · "}
+            {(data as any).heroCredit.license}
+          </a>
+        )}
       </section>
 
       {/* Story body */}

@@ -56,6 +56,7 @@ function shapeNeighbourhood(n: any) {
     schools: parseJsonArr(n.schools),
     gallery: parseJsonArr(n.gallery),
     borders: safeJson(n.borders, {}),
+    heroCredit: n.heroCredit ? safeJson(n.heroCredit, null) : null,
   };
 }
 
