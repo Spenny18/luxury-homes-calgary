@@ -182,7 +182,9 @@ app.use((req, res, next) => {
     {
       port,
       host: "0.0.0.0",
-      reusePort: true,
+      // reusePort is a Fly multi-process socket option; macOS rejects it
+      // (ENOTSUP), so only enable it when actually running on Fly.
+      reusePort: Boolean(process.env.FLY_MACHINE_ID),
     },
     () => {
       log(`serving on port ${port}`);
