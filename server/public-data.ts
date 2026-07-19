@@ -84,7 +84,12 @@ export async function getNeighbourhoodDetail(slug: string) {
   if (!n) return null;
 
   // Lazy fetch + cache the OSM polygon. Null if OSM has no match.
-  const polygon = await getNeighbourhoodPolygon(n.slug, n.name);
+  const polygon = await getNeighbourhoodPolygon(
+    n.slug,
+    n.name,
+    n.centerLat,
+    n.centerLng,
+  );
 
   // Over-fetch by name (CREB's `neighbourhood` field is a coarse district
   // label) and refine to the actual boundary with the polygon below.

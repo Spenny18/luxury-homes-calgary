@@ -43,18 +43,83 @@ async function rateLimit(): Promise<void> {
   lastFetchAt = Date.now();
 }
 
-async function fetchFromNominatim(name: string): Promise<Geometry | null> {
-  const query = `${name}, Calgary, Alberta, Canada`;
+// Reject any polygon whose centroid is more than this far from the stored
+// community centre. Guards against ambiguous names (e.g. "Harmony", "Richmond")
+// resolving to the wrong place. Generous enough for the largest estate
+// communities, which still centre within a few km of their pin.
+const MAX_POLYGON_DISTANCE_KM = 12;
+
+function haversineKm(
+  aLat: number,
+  aLng: number,
+  bLat: number,
+  bLng: number,
+): number {
+  const R = 6371;
+  const r = Math.PI / 180;
+  const dLat = (bLat - aLat) * r;
+  const dLng = (bLng - aLng) * r;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(aLat * r) * Math.cos(bLat * r) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+// Rough centroid: mean of every [lng, lat] vertex. Good enough to sanity-check
+// that a polygon sits near its community centre.
+function geomCentroid(geom: Geometry): [number, number] | null {
+  const pts: number[][] = [];
+  const walk = (a: any): void => {
+    if (typeof a[0] === "number") pts.push(a as number[]);
+    else for (const c of a) walk(c);
+  };
+  walk(geom.coordinates);
+  if (!pts.length) return null;
+  let sx = 0;
+  let sy = 0;
+  for (const [lng, lat] of pts) {
+    sx += lng;
+    sy += lat;
+  }
+  return [sy / pts.length, sx / pts.length]; // [lat, lng]
+}
+
+// True if the polygon sits near the community's stored centre.
+function polygonNearCentre(
+  geom: Geometry,
+  centerLat: number,
+  centerLng: number,
+): boolean {
+  const c = geomCentroid(geom);
+  if (!c) return false;
+  return (
+    haversineKm(c[0], c[1], centerLat, centerLng) <= MAX_POLYGON_DISTANCE_KM
+  );
+}
+
+async function fetchFromNominatim(
+  name: string,
+  centerLat: number,
+  centerLng: number,
+): Promise<Geometry | null> {
+  // Don't pin to "Calgary" — many communities are in Rocky View County,
+  // Foothills, Airdrie, Canmore, etc. The viewbox below is what actually
+  // disambiguates.
+  const query = `${name}, Alberta, Canada`;
   const url = new URL("https://nominatim.openstreetmap.org/search");
   url.searchParams.set("q", query);
   url.searchParams.set("format", "geojson");
   url.searchParams.set("polygon_geojson", "1");
   url.searchParams.set("limit", "1");
-  // Country hint keeps results tight to Canada. We deliberately don't set
-  // `featuretype` — none of Nominatim's coarse buckets (country/state/city/
-  // settlement) cover Calgary suburbs cleanly, and the qualified query
-  // string ("X, Calgary, Alberta, Canada") already disambiguates well.
   url.searchParams.set("countrycodes", "ca");
+  // Bias results to a box around the community's known centre so ambiguous
+  // names resolve locally (e.g. the Harmony in Springbank, not a Harmony
+  // street downtown). ~0.2° ≈ 15-22 km each way.
+  const d = 0.2;
+  url.searchParams.set(
+    "viewbox",
+    `${centerLng - d},${centerLat - d},${centerLng + d},${centerLat + d}`,
+  );
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 6000);
@@ -128,6 +193,8 @@ function writeCache(slug: string, geom: Geometry | null): void {
 export async function getNeighbourhoodPolygon(
   slug: string,
   name: string,
+  centerLat: number,
+  centerLng: number,
 ): Promise<Geometry | null> {
   const cached = readCache(slug);
   if (cached?.polygon !== null && cached?.polygon !== undefined) {
@@ -135,7 +202,13 @@ export async function getNeighbourhoodPolygon(
     // re-hitting Nominatim.
     if (cached.polygon === "") return null;
     try {
-      return JSON.parse(cached.polygon) as Geometry;
+      const geom = JSON.parse(cached.polygon) as Geometry;
+      // Validate on read so a previously-cached wrong polygon (e.g. Harmony
+      // matched to a downtown feature) self-heals: fall through to refetch.
+      if (polygonNearCentre(geom, centerLat, centerLng)) return geom;
+      console.warn(
+        `[polygons] cached polygon for ${slug} is off-centre — refetching`,
+      );
     } catch {
       // Corrupt cache row — fall through to refetch.
     }
@@ -146,9 +219,12 @@ export async function getNeighbourhoodPolygon(
   if (existing) return existing;
 
   const promise = (async () => {
-    const geom = await fetchFromNominatim(name);
-    writeCache(slug, geom);
-    return geom;
+    const geom = await fetchFromNominatim(name, centerLat, centerLng);
+    // Only trust a polygon that sits near the community centre; otherwise cache
+    // "no match" so the map falls back to the centre pin + zoom.
+    const valid = geom && polygonNearCentre(geom, centerLat, centerLng);
+    writeCache(slug, valid ? geom : null);
+    return valid ? geom : null;
   })().finally(() => {
     inflight.delete(slug);
   });
