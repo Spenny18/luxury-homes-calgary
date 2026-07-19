@@ -44,10 +44,11 @@ async function rateLimit(): Promise<void> {
 }
 
 // Reject any polygon whose centroid is more than this far from the stored
-// community centre. Guards against ambiguous names (e.g. "Harmony", "Richmond")
-// resolving to the wrong place. Generous enough for the largest estate
-// communities, which still centre within a few km of their pin.
-const MAX_POLYGON_DISTANCE_KM = 12;
+// community centre. Guards against ambiguous names (e.g. "Harmony") resolving
+// to the wrong place. Correct OSM boundaries centre within ~3 km of their pin
+// (upper-mount-royal 0.5, aspen-woods 1.3, mahogany 2.7); a wrong match sits
+// well beyond. Rejected → the map falls back to the accurate centre pin.
+const MAX_POLYGON_DISTANCE_KM = 5;
 
 function haversineKm(
   aLat: number,
