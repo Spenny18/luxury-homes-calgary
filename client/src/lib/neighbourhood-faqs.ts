@@ -100,10 +100,10 @@ export function buildNeighbourhoodFaqs(n: NeighbourhoodFaqInput): FaqEntry[] {
       const max = Math.max(...prices);
       priceText =
         min === max
-          ? `, currently listed around ${formatPriceCompact(min)}`
-          : `, currently priced from ${formatPriceCompact(
-              min,
-            )} to ${formatPriceCompact(max)}`;
+          ? `, priced around ${formatPriceCompact(min)}`
+          : `, priced from ${formatPriceCompact(min)} to ${formatPriceCompact(
+              max,
+            )}`;
     }
     const isAre = n.activeCount === 1 ? "is" : "are";
     const homeWord = n.activeCount === 1 ? "home" : "homes";
