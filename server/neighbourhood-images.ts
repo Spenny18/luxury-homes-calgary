@@ -32,6 +32,30 @@ export const neighbourhoodImages: NbImage[] = [
       sourceUrl: "https://commons.wikimedia.org/w/index.php?curid=68531052",
     },
   },
+  {
+    // Eau Claire — Peace Bridge over the Bow River, downtown skyline behind.
+    slug: "eau-claire",
+    heroImage: "/img/neighbourhoods/eau-claire.jpg",
+    heroCredit: {
+      author: "Yolanda Lie (Likeliehood)",
+      authorUrl: "https://commons.wikimedia.org/wiki/User:Likeliehood",
+      license: "CC BY-SA 4.0",
+      licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
+      sourceUrl: "https://commons.wikimedia.org/w/index.php?curid=82344032",
+    },
+  },
+  {
+    // Woodbine — autumn aspen forest in adjacent Fish Creek Provincial Park (CC0).
+    slug: "woodbine",
+    heroImage: "/img/neighbourhoods/woodbine.jpg",
+    heroCredit: null,
+  },
+  {
+    // Oakridge — Heritage Park steam railway on the Glenmore Reservoir (CC0).
+    slug: "oakridge",
+    heroImage: "/img/neighbourhoods/oakridge.jpg",
+    heroCredit: null,
+  },
 ];
 
 // A hero we're allowed to replace: the old stock/AI sources, a prior curated
