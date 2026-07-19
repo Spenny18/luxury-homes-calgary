@@ -88,6 +88,19 @@ app.use((req, res, next) => {
 
 (async () => {
   await registerRoutes(httpServer, app);
+
+  // Enrich neighbourhood pages with long-form editorial copy. registerRoutes()
+  // calls seedDatabase() (which inserts the base rows); this upgrades the copy
+  // fields in place, only when the new copy is longer than what's stored.
+  try {
+    const { applyNeighbourhoodContent } = await import(
+      "./apply-neighbourhood-content"
+    );
+    applyNeighbourhoodContent();
+  } catch (err) {
+    console.error("[nb-content] import failed:", err);
+  }
+
   // SEO endpoints — must be registered before the Vike catch-all below so
   // /sitemap.xml and /robots.txt don't fall through to Vike's "no page
   // matched" error renderer.
