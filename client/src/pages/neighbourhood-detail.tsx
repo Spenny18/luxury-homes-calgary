@@ -4,6 +4,8 @@ import { useData } from "vike-react/useData";
 import { ArrowRight, ChevronLeft, MapPin, Home as HomeIcon } from "lucide-react";
 import { PublicLayout } from "@/components/public-layout";
 import { ListingCard } from "@/components/listing-card";
+import { FaqAccordion } from "@/components/faq-accordion";
+import { buildNeighbourhoodFaqs } from "@/lib/neighbourhood-faqs";
 import { Button } from "@/components/ui/button";
 import { ClientOnly } from "@/components/client-only";
 import { formatPriceCompact } from "@/lib/format";
@@ -43,6 +45,18 @@ export default function NeighbourhoodDetailPage() {
   const story = parseJsonArray(data.story);
   const galleryImgs = parseJsonArray(data.gallery);
   const listings = data.listings ?? [];
+
+  // Same FAQ set emitted as FAQPage JSON-LD in pages/neighbourhoods/+Head.tsx.
+  const faqs = buildNeighbourhoodFaqs({
+    name: data.name,
+    slug: (data as any).slug,
+    quadrant: (data as any).quadrant,
+    borders: (data as any).borders,
+    avgPrice: data.avgPrice,
+    activeCount: data.activeCount,
+    schools: (data as any).schools,
+    listings,
+  });
 
   return (
     <PublicLayout transparentHeader>
@@ -207,6 +221,9 @@ export default function NeighbourhoodDetailPage() {
           )}
         </div>
       </section>
+
+      {/* FAQ */}
+      <FaqAccordion items={faqs} eyebrow={`FAQ · ${data.name.toUpperCase()}`} />
 
       {/* CTA */}
       <section className="max-w-[1100px] mx-auto px-6 lg:px-10 py-24 lg:py-32 text-center">

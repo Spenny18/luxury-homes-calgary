@@ -3,8 +3,10 @@ import {
   placeNode,
   breadcrumbsNode,
   webPageNode,
+  faqPageNode,
   jsonLdScriptHtml,
 } from "@/lib/schema";
+import { buildNeighbourhoodFaqs } from "@/lib/neighbourhood-faqs";
 
 // Handles /neighbourhoods (list) and /neighbourhoods/:slug (detail).
 export default function Head() {
@@ -26,6 +28,17 @@ export default function Head() {
           heroImage?: string | null;
           centerLat?: number;
           centerLng?: number;
+          quadrant?: string | null;
+          borders?: {
+            north?: string;
+            south?: string;
+            east?: string;
+            west?: string;
+          } | null;
+          avgPrice?: number | null;
+          activeCount?: number | null;
+          schools?: Array<{ name: string }> | null;
+          listings?: Array<{ listPrice: number }> | null;
         }
       | null
       | undefined;
@@ -47,6 +60,23 @@ export default function Head() {
           { name: n.name, url: `/neighbourhoods/${slug}` },
         ]),
       );
+
+      // FAQPage — same auto-generated set the page renders via FaqAccordion,
+      // so Google sees exactly what's on the page.
+      const faqNode = faqPageNode({
+        url: `/neighbourhoods/${slug}`,
+        items: buildNeighbourhoodFaqs({
+          name: n.name,
+          slug,
+          quadrant: n.quadrant,
+          borders: n.borders,
+          avgPrice: n.avgPrice,
+          activeCount: n.activeCount,
+          schools: n.schools,
+          listings: n.listings,
+        }),
+      });
+      if (faqNode) nodes.push(faqNode);
     }
   } else {
     nodes.push(
