@@ -1221,6 +1221,36 @@ export class DatabaseStorage implements IStorage {
       db.update(neighbourhoods).set({ activeCount: Number(c?.c ?? 0) }).where(eq(neighbourhoods.slug, n.slug)).run();
     }
   }
+  // Re-derive each active listing's neighbourhood from its stored subdivision
+  // via `resolve`. Returns the number of rows changed. One transaction so a
+  // few thousand updates commit in a single fsync.
+  retagMlsBySubdivision(
+    resolve: (subdivision: string | null) => string | undefined,
+  ): number {
+    const rows = db
+      .select({
+        id: mlsListings.id,
+        subdivision: mlsListings.subdivision,
+        neighbourhood: mlsListings.neighbourhood,
+      })
+      .from(mlsListings)
+      .where(eq(mlsListings.status, "Active"))
+      .all();
+    let updated = 0;
+    db.transaction((tx) => {
+      for (const r of rows) {
+        const next = resolve(r.subdivision);
+        if (next && next !== r.neighbourhood) {
+          tx.update(mlsListings)
+            .set({ neighbourhood: next })
+            .where(eq(mlsListings.id, r.id))
+            .run();
+          updated++;
+        }
+      }
+    });
+    return updated;
+  }
   // ---- Condo Buildings ---------------------------------------------------
   listCondoBuildings(): CondoBuilding[] {
     return db.select().from(condoBuildings).orderBy(asc(condoBuildings.sortOrder)).all();

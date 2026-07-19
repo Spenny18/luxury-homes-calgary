@@ -14,6 +14,14 @@ import "dotenv/config";
 import { RetsClient, RetsAuthError } from "./rets-client";
 import { storage } from "./storage";
 import type { InsertMlsListing } from "@shared/schema";
+import {
+  buildSubdivisionMap,
+  matchSubdivision,
+} from "./neighbourhood-match";
+
+// Normalised subdivision → neighbourhood lookup, (re)built at the start of each
+// sync run from the current neighbourhoods table.
+let subdivisionMap: Map<string, string> = new Map();
 
 const CALGARY_NEIGHBOURHOOD_HINTS: Array<[RegExp, string]> = [
   [/springbank\s*hill/i, "Springbank Hill"],
@@ -48,8 +56,17 @@ function normalizeListing(row: Record<string, string>): InsertMlsListing | null 
   const baths = row.BathroomsTotalInteger ? parseInt(row.BathroomsTotalInteger, 10) : 0;
   const yearBuilt = row.YearBuilt ? parseInt(row.YearBuilt, 10) : null;
   const photoCount = row.PhotosCount ? parseInt(row.PhotosCount, 10) : 0;
+  // Prefer CREB's SubdivisionName (covers all 72 communities); fall back to the
+  // remarks/address regex hints for the handful of listings whose subdivision
+  // doesn't map to one of our pages.
   const neighbourhood =
-    inferNeighbourhood(undefined, undefined, row.PublicRemarks, row.UnparsedAddress) ?? null;
+    matchSubdivision(row.SubdivisionName, subdivisionMap) ??
+    inferNeighbourhood(
+      row.SubdivisionName,
+      row.PublicRemarks,
+      row.UnparsedAddress,
+    ) ??
+    null;
 
   // Pillar 9 standard photo URL — we'll wire real GetObject fetches later.
   // For now we use a placeholder that signals "no photo yet" so the UI can
@@ -241,6 +258,9 @@ export async function runSync(): Promise<{
   let removed = 0;
   const seenIds = new Set<string>();
 
+  // Rebuild the subdivision → neighbourhood lookup for this run.
+  subdivisionMap = buildSubdivisionMap(storage.listNeighbourhoods());
+
   try {
     await client.login();
 
@@ -314,6 +334,19 @@ export async function runSync(): Promise<{
   } finally {
     try { await client.logout(); } catch {}
   }
+}
+
+// Re-tag already-synced listings from their stored SubdivisionName, without a
+// RETS round-trip. Runs at startup so every neighbourhood page shows its live
+// inventory immediately after a deploy, instead of waiting for the next sync.
+// Idempotent: once a listing carries the right neighbourhood, nothing changes.
+export function backfillMlsNeighbourhoods(): void {
+  const map = buildSubdivisionMap(storage.listNeighbourhoods());
+  const updated = storage.retagMlsBySubdivision((subdivision) =>
+    matchSubdivision(subdivision, map),
+  );
+  if (updated > 0) storage.refreshNeighbourhoodActiveCounts();
+  console.log(`[mls-retag] re-tagged ${updated} listings by subdivision`);
 }
 
 let timer: NodeJS.Timeout | null = null;

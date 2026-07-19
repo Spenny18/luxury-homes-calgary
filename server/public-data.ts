@@ -98,6 +98,11 @@ export async function getNeighbourhoodDetail(slug: string) {
         l.lng != null &&
         pointInGeometry(l.lng as number, l.lat as number, polygon as any),
     );
+    // The subdivision match is already community-precise; if a coarse or
+    // mis-fetched OSM polygon (or listings missing coordinates) filters
+    // everything out, fall back to the name-matched set rather than showing an
+    // empty grid on a community that genuinely has inventory.
+    if (listings.length === 0) listings = candidates;
   } else {
     // No polygon → fall back to the name-only match.
     listings = candidates;

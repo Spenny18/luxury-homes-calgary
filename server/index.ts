@@ -4,7 +4,7 @@ import type { Request } from "express";
 import { registerRoutes } from "./routes";
 import { registerSeoRoutes } from "./seo";
 import { createServer } from "node:http";
-import { startSyncCron } from "./rets-sync";
+import { startSyncCron, backfillMlsNeighbourhoods } from "./rets-sync";
 import { startLeadAlertCron } from "./lead-alert-cron";
 import path from "node:path";
 
@@ -99,6 +99,15 @@ app.use((req, res, next) => {
     applyNeighbourhoodContent();
   } catch (err) {
     console.error("[nb-content] import failed:", err);
+  }
+
+  // Re-tag already-synced MLS listings to their real community via CREB's
+  // SubdivisionName, so every neighbourhood page shows live inventory right
+  // away instead of only the six regex-matched farm areas.
+  try {
+    backfillMlsNeighbourhoods();
+  } catch (err) {
+    console.error("[mls-retag] failed:", err);
   }
 
   // SEO endpoints — must be registered before the Vike catch-all below so
