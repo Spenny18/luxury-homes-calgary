@@ -56,6 +56,71 @@ export const neighbourhoodImages: NbImage[] = [
     heroImage: "/img/neighbourhoods/oakridge.jpg",
     heroCredit: null,
   },
+  {
+    slug: "elbow-park",
+    heroImage: "/img/neighbourhoods/elbow-park.jpg",
+    heroCredit: {
+      author: "davebloggs007",
+      authorUrl: "https://www.flickr.com/photos/davebloggs007/",
+      license: "CC BY-SA 2.0",
+      licenseUrl: "https://creativecommons.org/licenses/by-sa/2.0/",
+      sourceUrl: "https://commons.wikimedia.org/w/index.php?curid=89140293",
+    },
+  },
+  {
+    slug: "upper-mount-royal",
+    heroImage: "/img/neighbourhoods/upper-mount-royal.jpg",
+    heroCredit: {
+      author: "Michael from Calgary, AB, Canada",
+      authorUrl: "https://www.flickr.com/people/13907834@N00",
+      license: "CC BY 2.0",
+      licenseUrl: "https://creativecommons.org/licenses/by/2.0/",
+      sourceUrl: "https://commons.wikimedia.org/w/index.php?curid=78806063",
+    },
+  },
+  {
+    slug: "beltline",
+    heroImage: "/img/neighbourhoods/beltline.jpg",
+    heroCredit: {
+      author: "Realc",
+      authorUrl: "https://commons.wikimedia.org/wiki/User:Realc",
+      license: "CC BY-SA 4.0",
+      licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0",
+      sourceUrl: "https://commons.wikimedia.org/wiki/File:Calgary_Skyline_May_2018_(cropped).jpg",
+    },
+  },
+  {
+    slug: "inglewood",
+    heroImage: "/img/neighbourhoods/inglewood.jpg",
+    heroCredit: null,
+  },
+  {
+    slug: "west-hillhurst",
+    heroImage: "/img/neighbourhoods/west-hillhurst.jpg",
+    heroCredit: null,
+  },
+  {
+    slug: "edgemont",
+    heroImage: "/img/neighbourhoods/edgemont.jpg",
+    heroCredit: {
+      author: "Thank you for visiting my page from Canada",
+      authorUrl: "https://www.flickr.com/people/92599451@N08",
+      license: "CC BY 2.0",
+      licenseUrl: "https://creativecommons.org/licenses/by/2.0/",
+      sourceUrl: "https://commons.wikimedia.org/w/index.php?curid=66193715",
+    },
+  },
+  {
+    slug: "discovery-ridge",
+    heroImage: "/img/neighbourhoods/discovery-ridge.jpg",
+    heroCredit: {
+      author: "jockrutherford",
+      authorUrl: "https://www.flickr.com/people/27501268@N00",
+      license: "CC BY-SA 2.0",
+      licenseUrl: "https://creativecommons.org/licenses/by-sa/2.0/",
+      sourceUrl: "https://commons.wikimedia.org/w/index.php?curid=89140296",
+    },
+  },
 ];
 
 // A hero we're allowed to replace: the old stock/AI sources, a prior curated
