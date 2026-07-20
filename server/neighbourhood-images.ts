@@ -121,6 +121,55 @@ export const neighbourhoodImages: NbImage[] = [
       sourceUrl: "https://commons.wikimedia.org/w/index.php?curid=89140296",
     },
   },
+  {
+    slug: "bridgeland-riverside",
+    heroImage: "/img/neighbourhoods/bridgeland-riverside.jpg",
+    heroCredit: {
+      author: "CocoRoux",
+      authorUrl: "https://commons.wikimedia.org/w/index.php?title=User:CocoRoux&action=edit&redlink=1",
+      license: "CC BY-SA 4.0",
+      licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
+      sourceUrl: "https://commons.wikimedia.org/w/index.php?curid=59909714",
+    },
+  },
+  {
+    slug: "ramsay",
+    heroImage: "/img/neighbourhoods/ramsay.jpg",
+    heroCredit: {
+      author: "DXR",
+      authorUrl: "https://commons.wikimedia.org/wiki/User:DXR",
+      license: "CC BY-SA 4.0",
+      licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
+      sourceUrl: "https://commons.wikimedia.org/w/index.php?curid=157033685",
+    },
+  },
+  {
+    slug: "mount-pleasant",
+    heroImage: "/img/neighbourhoods/mount-pleasant.jpg",
+    heroCredit: {
+      author: "davebloggs007",
+      authorUrl: "https://www.flickr.com/people/92599451@N08",
+      license: "CC BY 2.0",
+      licenseUrl: "https://creativecommons.org/licenses/by/2.0/",
+      sourceUrl: "https://commons.wikimedia.org/w/index.php?curid=66193741",
+    },
+  },
+  {
+    slug: "parkdale",
+    heroImage: "/img/neighbourhoods/parkdale.jpg",
+    heroCredit: null,
+  },
+  {
+    slug: "hillhurst",
+    heroImage: "/img/neighbourhoods/hillhurst.jpg",
+    heroCredit: {
+      author: "Thank you for visiting my page from Canada (Flickr)",
+      authorUrl: "https://www.flickr.com/people/92599451@N08",
+      license: "CC BY 2.0",
+      licenseUrl: "https://creativecommons.org/licenses/by/2.0/",
+      sourceUrl: "https://commons.wikimedia.org/w/index.php?curid=66194195",
+    },
+  },
 ];
 
 // A hero we're allowed to replace: the old stock/AI sources, a prior curated
