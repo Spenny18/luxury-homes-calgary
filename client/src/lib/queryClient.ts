@@ -57,6 +57,27 @@ export async function apiRequest(
   return res;
 }
 
+// Multipart upload (apiRequest is JSON-only). Reuses the bearer token; returns
+// the stored image's /uploads/* path.
+export async function uploadImage(
+  file: Blob,
+  slug?: string,
+): Promise<string> {
+  const fd = new FormData();
+  fd.append("file", file, "hero.jpg");
+  if (slug) fd.append("slug", slug);
+  const headers: Record<string, string> = {};
+  if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+  const res = await fetch(`${API_BASE}/api/admin/cms/upload`, {
+    method: "POST",
+    credentials: "include",
+    headers,
+    body: fd,
+  });
+  await throwIfResNotOk(res);
+  return (await res.json()).url as string;
+}
+
 type UnauthorizedBehavior = "returnNull" | "throw";
 export const getQueryFn: <T>(options: {
   on401: UnauthorizedBehavior;

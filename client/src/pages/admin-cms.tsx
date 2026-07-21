@@ -8,7 +8,29 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, uploadImage } from "@/lib/queryClient";
+
+// Downscale + JPEG-compress an image in the browser before upload so heroes
+// stay small (~1600px wide). Returns a Blob.
+async function resizeImage(file: File, maxW = 1600): Promise<Blob> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxW / bitmap.width);
+  const w = Math.round(bitmap.width * scale);
+  const h = Math.round(bitmap.height * scale);
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return file;
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  return await new Promise<Blob>((resolve) =>
+    canvas.toBlob(
+      (b) => resolve(b ?? file),
+      "image/jpeg",
+      0.82,
+    ),
+  );
+}
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -617,6 +639,11 @@ interface NeighbourhoodFormState {
   name: string;
   tagline: string;
   heroImage: string;
+  creditAuthor: string;
+  creditAuthorUrl: string;
+  creditLicense: string;
+  creditLicenseUrl: string;
+  creditSourceUrl: string;
   story: string;
   outsideCopy: string;
   amenitiesCopy: string;
@@ -635,7 +662,9 @@ interface NeighbourhoodFormState {
 }
 
 const EMPTY_NEIGHBOURHOOD: NeighbourhoodFormState = {
-  slug: "", name: "", tagline: "", heroImage: "", story: "",
+  slug: "", name: "", tagline: "", heroImage: "",
+  creditAuthor: "", creditAuthorUrl: "", creditLicense: "", creditLicenseUrl: "", creditSourceUrl: "",
+  story: "",
   outsideCopy: "", amenitiesCopy: "", shopDineCopy: "",
   realEstateCopy: "", lifeCopy: "", schools: "", gallery: "",
   centerLat: "", centerLng: "", avgPrice: "0", activeCount: "0",
@@ -651,11 +680,23 @@ function neighbourhoodToForm(n: any): NeighbourhoodFormState {
   } catch {
     bordersStr = safeStr(n.borders) || "{}";
   }
+  let credit: any = {};
+  try {
+    credit = typeof n.heroCredit === "string" ? JSON.parse(n.heroCredit || "{}") : (n.heroCredit ?? {});
+    if (!credit || typeof credit !== "object") credit = {};
+  } catch {
+    credit = {};
+  }
   return {
     slug: safeStr(n.slug),
     name: safeStr(n.name),
     tagline: safeStr(n.tagline),
     heroImage: safeStr(n.heroImage),
+    creditAuthor: safeStr(credit.author),
+    creditAuthorUrl: safeStr(credit.authorUrl),
+    creditLicense: safeStr(credit.license),
+    creditLicenseUrl: safeStr(credit.licenseUrl),
+    creditSourceUrl: safeStr(credit.sourceUrl),
     story: arrayToTextarea(n.story),
     outsideCopy: arrayToTextarea(n.outsideCopy),
     amenitiesCopy: arrayToTextarea(n.amenitiesCopy),
@@ -708,6 +749,16 @@ function NeighbourhoodForm({
         schools: schoolsParsed,
         gallery: payload.gallery.split(/\n+/).map((s) => s.trim()).filter(Boolean),
         borders: payload.borders,
+        heroCredit:
+          payload.creditAuthor || payload.creditLicense || payload.creditSourceUrl
+            ? {
+                author: payload.creditAuthor,
+                authorUrl: payload.creditAuthorUrl,
+                license: payload.creditLicense,
+                licenseUrl: payload.creditLicenseUrl,
+                sourceUrl: payload.creditSourceUrl,
+              }
+            : "",
       };
       const res = await apiRequest(method, url, body);
       return res.json();
@@ -789,7 +840,43 @@ function NeighbourhoodForm({
         </Field>
       </div>
       <Field label="Tagline"><Input value={form.tagline} onChange={(e) => set("tagline", e.target.value)} /></Field>
-      <Field label="Hero image URL"><Input value={form.heroImage} onChange={(e) => set("heroImage", e.target.value)} /></Field>
+      <Field label="Hero image" hint="Paste a URL, or upload a photo (auto-resized to ~1600px). Relative /img or /uploads paths are fine.">
+        <div className="flex gap-2 items-center">
+          <Input value={form.heroImage} onChange={(e) => set("heroImage", e.target.value)} placeholder="/uploads/… or https://…" />
+          <label className="shrink-0 inline-flex items-center px-3 h-9 rounded-md border border-input text-sm cursor-pointer hover:bg-accent whitespace-nowrap">
+            Upload…
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                try {
+                  const blob = await resizeImage(file, 1600);
+                  const url = await uploadImage(blob, form.slug || form.name);
+                  set("heroImage", url);
+                  // Uploaded photos are Spencer's own — clear any CC credit.
+                  set("creditAuthor", ""); set("creditAuthorUrl", ""); set("creditLicense", ""); set("creditLicenseUrl", ""); set("creditSourceUrl", "");
+                  toast({ title: "Uploaded", description: url });
+                } catch (err: any) {
+                  toast({ title: "Upload failed", description: String(err?.message ?? err), variant: "destructive" });
+                }
+                e.target.value = "";
+              }}
+            />
+          </label>
+        </div>
+        {form.heroImage ? <img src={form.heroImage} alt="" className="mt-2 h-24 rounded object-cover border" /> : null}
+      </Field>
+      <Field label="Photo credit (optional)" hint="Only for CC-licensed photos — shows a small caption on the hero. Leave blank for your own photos.">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <Input value={form.creditAuthor} onChange={(e) => set("creditAuthor", e.target.value)} placeholder="Author / photographer" />
+          <Input value={form.creditLicense} onChange={(e) => set("creditLicense", e.target.value)} placeholder="License (e.g. CC BY 2.0)" />
+          <Input value={form.creditSourceUrl} onChange={(e) => set("creditSourceUrl", e.target.value)} placeholder="Source page URL" />
+          <Input value={form.creditLicenseUrl} onChange={(e) => set("creditLicenseUrl", e.target.value)} placeholder="License URL (optional)" />
+        </div>
+      </Field>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Field label="Center lat"><Input value={form.centerLat} onChange={(e) => set("centerLat", e.target.value)} /></Field>

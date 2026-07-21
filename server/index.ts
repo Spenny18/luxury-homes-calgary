@@ -174,6 +174,13 @@ app.use((req, res, next) => {
     // Serve hashed client assets (the JS/CSS chunks Vike's build emits) and
     // any prerendered HTML files. The catch-all below falls through to Vike
     // for routes that aren't a static file (e.g. SSR'd /, /p/:slug).
+    // User-uploaded CMS images from the persistent volume (survive deploys).
+    const { uploadsDir } = await import("./uploads");
+    app.use(
+      "/uploads",
+      express.static(uploadsDir, { index: false, maxAge: "30d" }),
+    );
+
     const clientDist = path.resolve(__dirname, "client");
     // `redirect: false` stops express.static from issuing a 301 to add a
     // trailing slash when the URL matches a directory (which it does for

@@ -5,7 +5,18 @@
 // Mounted from routes.ts via registerAdminCmsRoutes(app, requireAuth).
 import type { Express, RequestHandler } from "express";
 import { z } from "zod";
+import multer from "multer";
+import fs from "node:fs";
+import path from "node:path";
 import { storage } from "./storage";
+import { uploadsDir } from "./uploads";
+
+// Hero-image uploads. The client resizes/compresses in-browser before sending,
+// so we just persist the bytes; the 12 MB cap is a backstop for unresized files.
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 12 * 1024 * 1024 },
+});
 
 // Slug helper — keeps URLs clean and lets the admin form accept either
 // a custom slug or auto-derive one from the name/title.
@@ -58,7 +69,13 @@ const condoSchema = z.object({
   architect: z.string().nullable().optional(),
   lat: z.union([z.number(), z.string()]),
   lng: z.union([z.number(), z.string()]),
-  heroImage: z.string().url("Hero image must be a URL"),
+  heroImage: z
+    .string()
+    .min(1)
+    .refine(
+      (v) => v.startsWith("/") || /^https?:\/\//i.test(v),
+      "Hero image must be a full URL or a site path like /img/…",
+    ),
   gallery: z.any().default([]),
   featured: z.boolean().default(false),
   sortOrder: z.union([z.number(), z.string()]).default(99),
@@ -136,7 +153,15 @@ const neighbourhoodSchema = z.object({
   sortOrder: z.union([z.number(), z.string()]).default(99),
   quadrant: z.string().default("city-centre"),
   borders: z.any().default({}),
-  heroImage: z.string().url("Hero image must be a URL"),
+  // Optional photo attribution (for CC-licensed heroes). Object or "" for none.
+  heroCredit: z.any().optional(),
+  heroImage: z
+    .string()
+    .min(1)
+    .refine(
+      (v) => v.startsWith("/") || /^https?:\/\//i.test(v),
+      "Hero image must be a full URL or a site path like /img/…",
+    ),
 });
 
 function neighbourhoodFromBody(body: unknown) {
@@ -174,6 +199,21 @@ function neighbourhoodFromBody(body: unknown) {
     quadrant: parsed.quadrant ?? "city-centre",
     borders: JSON.stringify(borders),
     heroImage: parsed.heroImage,
+    heroCredit: (() => {
+      const c = parsed.heroCredit;
+      if (!c) return "";
+      if (typeof c === "string") return c; // already-serialized JSON or ""
+      const has = c.author || c.license || c.sourceUrl;
+      return has
+        ? JSON.stringify({
+            author: c.author ?? "",
+            authorUrl: c.authorUrl ?? "",
+            license: c.license ?? "",
+            licenseUrl: c.licenseUrl ?? "",
+            sourceUrl: c.sourceUrl ?? "",
+          })
+        : "";
+    })(),
   };
 }
 
@@ -185,7 +225,13 @@ const blogSchema = z.object({
   excerpt: z.string().default(""),
   body: z.string().default(""),
   category: z.string().default("Market"),
-  heroImage: z.string().url("Hero image must be a URL"),
+  heroImage: z
+    .string()
+    .min(1)
+    .refine(
+      (v) => v.startsWith("/") || /^https?:\/\//i.test(v),
+      "Hero image must be a full URL or a site path like /img/…",
+    ),
   authorName: z.string().default("Spencer Rivers"),
   authorAvatar: z.string().nullable().optional(),
   readMinutes: z.union([z.number(), z.string()]).default(5),
@@ -215,6 +261,38 @@ export function registerAdminCmsRoutes(
   app: Express,
   requireAuth: RequestHandler,
 ) {
+  // ---- Image upload ----
+  // Stores an uploaded hero image on the persistent volume and returns its
+  // /uploads/* path, ready to drop into a heroImage field.
+  app.post(
+    "/api/admin/cms/upload",
+    requireAuth,
+    upload.single("file"),
+    (req, res) => {
+      const file = (req as unknown as { file?: Express.Multer.File }).file;
+      if (!file) return res.status(400).json({ message: "No file uploaded" });
+      if (!/^image\//.test(file.mimetype)) {
+        return res.status(400).json({ message: "File must be an image" });
+      }
+      const ext =
+        file.mimetype === "image/png"
+          ? "png"
+          : file.mimetype === "image/webp"
+            ? "webp"
+            : "jpg";
+      const base = req.body?.slug ? slugify(String(req.body.slug)) : "hero";
+      const name = `${base || "hero"}-${Date.now().toString(36)}.${ext}`;
+      try {
+        fs.writeFileSync(path.join(uploadsDir, name), file.buffer);
+        res.json({ url: `/uploads/${name}` });
+      } catch (err: unknown) {
+        res
+          .status(500)
+          .json({ message: (err as Error)?.message ?? "Upload failed" });
+      }
+    },
+  );
+
   // ---- Condos ----
   app.get("/api/admin/cms/condos", requireAuth, (_req, res) => {
     res.json(storage.listCondoBuildings());
